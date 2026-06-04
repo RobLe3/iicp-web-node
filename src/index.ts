@@ -75,7 +75,10 @@ export function discoverUrl(directoryUrl: string, intent: string, opts: Discover
   if (opts.region) params.set("region", opts.region);
   if (opts.min_reputation != null) params.set("min_reputation", String(opts.min_reputation));
   if (opts.limit != null) params.set("limit", String(opts.limit));
-  return `${directoryUrl.replace(/\/+$/, "")}/v1/discover?${params}`;
+  // /api/v1 — the directory API prefix (verified against prod iicp.network 2026-06-04:
+  // /api/v1/discover → JSON {nodes,count,query_ms}; a bare /v1/discover hits the website's
+  // static HTML fallback, not the directory). Same /api/v1 lesson as the federation work.
+  return `${directoryUrl.replace(/\/+$/, "")}/api/v1/discover?${params}`;
 }
 
 /**

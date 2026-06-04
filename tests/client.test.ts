@@ -10,13 +10,13 @@ import {
   DEFAULT_DIRECTORY_URL,
 } from "../src/index.ts";
 
-test("discoverUrl builds /v1/discover with intent + opts, trims trailing slash", () => {
+test("discoverUrl builds /api/v1/discover with intent + opts, trims trailing slash", () => {
   const u = discoverUrl("https://iicp.network/", "urn:iicp:intent:llm:chat:v1", {
     region: "eu",
     min_reputation: 0.5,
     limit: 5,
   });
-  assert.ok(u.startsWith("https://iicp.network/v1/discover?"), u);
+  assert.ok(u.startsWith("https://iicp.network/api/v1/discover?"), u);
   assert.ok(!u.includes("network//v1"), "must not double-slash");
   const q = new URL(u).searchParams;
   assert.equal(q.get("intent"), "urn:iicp:intent:llm:chat:v1");
@@ -27,7 +27,7 @@ test("discoverUrl builds /v1/discover with intent + opts, trims trailing slash",
 
 test("default directory is iicp.network", () => {
   assert.equal(DEFAULT_DIRECTORY_URL, "https://iicp.network");
-  assert.ok(discoverUrl(DEFAULT_DIRECTORY_URL, "urn:iicp:intent:llm:chat:v1").includes("https://iicp.network/v1/discover"));
+  assert.ok(discoverUrl(DEFAULT_DIRECTORY_URL, "urn:iicp:intent:llm:chat:v1").includes("https://iicp.network/api/v1/discover"));
 });
 
 test("invalid intent URN is rejected (parity with @iicp/client SDK-02)", () => {
