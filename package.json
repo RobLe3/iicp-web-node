@@ -1,0 +1,21 @@
+{
+  "name": "@iicp/client-wasm",
+  "version": "0.1.0",
+  "description": "Browser-native, consumer-only IICP discovery-mesh client (zero runtime deps, ESM).",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "keywords": ["iicp", "browser", "consumer", "discovery", "mesh", "esm"],
+  "license": "Apache-2.0",
+  "engines": { "node": ">=18" },
+  "devDependencies": { "tsx": "^4.19.2", "typescript": "^5.6.3" }
+}
