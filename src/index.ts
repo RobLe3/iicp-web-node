@@ -81,42 +81,6 @@ export function discoverUrl(directoryUrl: string, intent: string, opts: Discover
   return `${directoryUrl.replace(/\/+$/, "")}/api/v1/discover?${params}`;
 }
 
-/**
- * Minimal CIP consumer envelope (JSON form). The consumer wraps its payload with
- * the cooperative-inference policy it requires; a provider node honours or rejects it.
- * JSON-first by design (no CBOR dependency — keeps the bundle ~100KB per #292).
- */
-export interface CipEnvelope {
-  iicp_version: "1";
-  mode: "consumer";
-  intent: string;
-  payload: unknown;
-  cip_policy: {
-    allow_remote_inference: boolean;
-    allow_tool_execution: boolean;
-    allow_file_access: boolean;
-  };
-}
-
-export function cipConsumerEnvelope(
-  intent: string,
-  payload: unknown,
-  policy?: Partial<CipEnvelope["cip_policy"]>,
-): CipEnvelope {
-  validateIntent(intent);
-  return {
-    iicp_version: "1",
-    mode: "consumer",
-    intent,
-    payload,
-    cip_policy: {
-      allow_remote_inference: policy?.allow_remote_inference ?? true,
-      allow_tool_execution: policy?.allow_tool_execution ?? false,
-      allow_file_access: policy?.allow_file_access ?? false,
-    },
-  };
-}
-
 /** Browser-native, consumer-only IICP client. */
 export class IicpBrowserClient {
   private readonly directory: string;
@@ -161,31 +125,45 @@ export class IicpBrowserClient {
   }
 
   /**
-   * Route a chat to a node's endpoint (CIP consumer mode).
+   * Route a chat to a node over the node's **HTTP transport**: `POST {endpoint}/v1/task`
+   * with the real task body `{ task_id, intent, payload, constraints }` (SDK-01/02 — same
+   * shape the @iicp/client Node SDK sends; the node replies `{ task_id, result, status,
+   * metrics }`). `payload` for llm:chat is `{ messages, model }`.
    *
-   * ⚠ CORS reality (#448): from an https:// page the browser can reach iicp.network
-   * (discover) but NOT http://localhost LLMs (mixed-content; Chrome 129+ flag only) nor
-   * a discovered node that doesn't send Access-Control-Allow-Origin. Pass `endpoint`
-   * explicitly to target a CORS-enabled or local-with-flag node. In Node there is no
-   * CORS restriction. Returns the node's raw JSON response.
+   * Transport note: nodes also expose the **native IICP binary protocol on port 9484**
+   * (`transport_endpoint: iicp://…`) — more efficient, used by the full SDKs. A browser
+   * can't open raw TCP, so this client uses the HTTP transport (the discover `endpoint`).
+   *
+   * ⚠ Reachability: from an https:// page the browser reaches iicp.network (discover) but
+   * NOT http://localhost LLMs (mixed-content; Chrome 129+ flag only), nor a node without
+   * CORS, nor an IPv6-firewalled node (today's live nodes are `ipv6_direct_firewall_required`).
+   * Pass a reachable `endpoint`. In Node there is no CORS restriction. Returns the node JSON.
    */
   async chat(
     messages: ChatMessage[],
     opts: { endpoint: string; intent?: string; model?: string },
   ): Promise<Record<string, unknown>> {
     const intent = opts.intent ?? "urn:iicp:intent:llm:chat:v1";
-    const envelope = cipConsumerEnvelope(intent, { messages, model: opts.model });
+    validateIntent(intent);
+    const taskId =
+      globalThis.crypto?.randomUUID?.() ?? `task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const body = {
+      task_id: taskId,
+      intent,
+      constraints: {},
+      payload: { messages, model: opts.model },
+    };
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), this.timeout);
     try {
-      const resp = await fetch(`${opts.endpoint.replace(/\/+$/, "")}/v1/call`, {
+      const resp = await fetch(`${opts.endpoint.replace(/\/+$/, "")}/v1/task`, {
         method: "POST",
         signal: ctrl.signal,
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(envelope),
+        body: JSON.stringify(body),
       });
       if (!resp.ok) {
-        throw new IicpError(`chat → ${resp.status}`, "node_error", resp.status);
+        throw new IicpError(`task → ${resp.status}`, "node_error", resp.status);
       }
       return (await resp.json()) as Record<string, unknown>;
     } finally {

@@ -4,7 +4,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   discoverUrl,
-  cipConsumerEnvelope,
   IicpBrowserClient,
   IicpError,
   DEFAULT_DIRECTORY_URL,
@@ -28,23 +27,6 @@ test("discoverUrl builds /api/v1/discover with intent + opts, trims trailing sla
 test("default directory is iicp.network", () => {
   assert.equal(DEFAULT_DIRECTORY_URL, "https://iicp.network");
   assert.ok(discoverUrl(DEFAULT_DIRECTORY_URL, "urn:iicp:intent:llm:chat:v1").includes("https://iicp.network/api/v1/discover"));
-});
-
-test("invalid intent URN is rejected (parity with @iicp/client SDK-02)", () => {
-  assert.throws(() => cipConsumerEnvelope("not-a-urn", {}), (e: unknown) => e instanceof IicpError && (e as IicpError).code === "invalid_intent");
-  // a valid one does not throw
-  cipConsumerEnvelope("urn:iicp:intent:llm:chat:v1", { x: 1 });
-});
-
-test("cipConsumerEnvelope shape is stable (consumer mode, safe-by-default policy)", () => {
-  const env = cipConsumerEnvelope("urn:iicp:intent:llm:chat:v1", { messages: [] });
-  assert.equal(env.iicp_version, "1");
-  assert.equal(env.mode, "consumer");
-  assert.equal(env.intent, "urn:iicp:intent:llm:chat:v1");
-  // safe defaults: remote inference on (the point of CIP), tool-exec + file-access OFF
-  assert.equal(env.cip_policy.allow_remote_inference, true);
-  assert.equal(env.cip_policy.allow_tool_execution, false);
-  assert.equal(env.cip_policy.allow_file_access, false);
 });
 
 test("client.discover rejects an invalid intent before any fetch", async () => {
