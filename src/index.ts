@@ -66,6 +66,35 @@ function validateIntent(intent: string): void {
   }
 }
 
+/** CIP consumer task envelope — extracted for testability (KAT, parity with @iicp/client). */
+export interface TaskEnvelope {
+  task_id: string;
+  intent: string;
+  constraints: Record<string, unknown>;
+  payload: { messages: ChatMessage[]; model?: string };
+}
+
+/**
+ * Build the CIP consumer task envelope. Pure, deterministic (pass task_id for KAT).
+ * Wire-protocol parity with the Node SDK: `POST {endpoint}/v1/task` with this body.
+ */
+export function cipConsumerEnvelope(
+  messages: ChatMessage[],
+  opts: { intent?: string; model?: string; task_id?: string } = {},
+): TaskEnvelope {
+  const intent = opts.intent ?? "urn:iicp:intent:llm:chat:v1";
+  validateIntent(intent);
+  const taskId =
+    opts.task_id ??
+    (globalThis.crypto?.randomUUID?.() ?? `task-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  return {
+    task_id: taskId,
+    intent,
+    constraints: {},
+    payload: { messages, model: opts.model },
+  };
+}
+
 /**
  * Build the discover URL. Extracted so the query construction is unit-testable
  * (same discipline as the federation event-log URL regression test).
@@ -143,16 +172,7 @@ export class IicpBrowserClient {
     messages: ChatMessage[],
     opts: { endpoint: string; intent?: string; model?: string },
   ): Promise<Record<string, unknown>> {
-    const intent = opts.intent ?? "urn:iicp:intent:llm:chat:v1";
-    validateIntent(intent);
-    const taskId =
-      globalThis.crypto?.randomUUID?.() ?? `task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const body = {
-      task_id: taskId,
-      intent,
-      constraints: {},
-      payload: { messages, model: opts.model },
-    };
+    const body = cipConsumerEnvelope(messages, { intent: opts.intent, model: opts.model });
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), this.timeout);
     try {
