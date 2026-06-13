@@ -1,56 +1,62 @@
-# @iicp/client-wasm
+# @iicp/web-node
 
-Browser-native, **consumer-only** client for the [IICP](https://iicp.network) discovery
-mesh. Zero runtime dependencies, ESM, built on native `fetch` / `TextEncoder` /
-`SubtleCrypto` — embeds directly into a web page (and runs in Node ≥18).
+Browser-native **IICP node** for the [IICP](https://iicp.network) mesh — **consume** AI
+from the network *and* **serve** a model from a browser tab. ESM, built on the platform's
+native `fetch` / `SubtleCrypto` / WebGPU (and runs in Node ≥18). End-to-end payload
+encryption is **mandatory** and on by default.
 
-> **Naming:** despite the `-wasm` name (historical, from research issue #292), this is
-> **TypeScript, not WebAssembly**. A Rust→WASM compile of the node was found infeasible
-> (`tokio`/`reqwest` don't target `wasm32`); a tiny TS consumer is the right tool. See
-> `research/wasm/WASM-1-feasibility.md`.
-
-This is the **consumer subset** only — it discovers nodes and routes tasks. It never
-registers as a provider and has no TCP / NAT / relay machinery (that's the full
-[`@iicp/client`](https://www.npmjs.com/package/@iicp/client) Node SDK).
-
-## Install
-
-```bash
-npm install @iicp/client-wasm
+```
+npm install @iicp/web-node
 ```
 
-## Use (in a page or Node)
+## Consume — call the mesh
 
 ```ts
-import { IicpBrowserClient } from "@iicp/client-wasm";
+import { IicpBrowserClient, nodeCxKey } from "@iicp/web-node";
 
-const iicp = new IicpBrowserClient(); // defaults to https://iicp.network
+const client = new IicpBrowserClient(); // defaults to https://iicp.network
+const nodes = await client.discover("urn:iicp:intent:llm:chat:v1");
 
-// Discover — works from any https:// page (iicp.network sends CORS headers)
-const nodes = await iicp.discover("urn:iicp:intent:llm:chat:v1");
-const stats = await iicp.stats(); // { mesh_health, server.active_nodes, ... }
-
-// Route a chat to a node you can actually reach (see CORS reality below)
-const reply = await iicp.chat(
-  [{ role: "user", content: "hello" }],
-  { endpoint: "http://localhost:11434" }, // local-with-Chrome-flag, or a CORS-enabled node
+const node = nodes[0];
+const reply = await client.chat(
+  [{ role: "user", content: "Hello!" }],
+  { endpoint: node.endpoint, model: "llama3", cxPublicKey: nodeCxKey(node) },
 );
 ```
 
-## CORS reality (read before wiring task routing)
+When the chosen node advertises an encryption key (`nodeCxKey(node)`), the payload is
+**sealed end-to-end** — the directory, relays, and network see only ciphertext. There is
+no opt-out; a node not yet advertising a key triggers a loud transitional plaintext
+warning during the mesh rollout.
 
-From an `https://` page the browser **can** discover via iicp.network but **cannot**:
+## Serve — be a node from the browser
 
-| Target | Browser reachable? | Why |
-|---|---|---|
-| `https://iicp.network` (discover/stats) | ✅ yes | CORS headers present |
-| `http://localhost:11434` (Ollama / local LLM) | ⚠ Chrome 129+ flag only | HTTPS→HTTP mixed-content blocked elsewhere |
-| arbitrary discovered node endpoint | ❌ no (unless it sends CORS) | no `Access-Control-Allow-Origin` |
+```ts
+import { BrowserNodeProvider, WEBLLM_MODELS, assessDevice } from "@iicp/web-node";
+// Loads a small model in-tab via WebLLM (WebGPU/WASM) and serves it behind a relay.
+```
 
-So an in-page consumer reliably does **discovery + mesh visualisation** everywhere; **task
-routing** works against CORS-enabled nodes or a local endpoint with the Chrome flag. In
-**Node** there is no CORS restriction and everything works. (Tracking: #448.)
+Serving requires WebLLM — add it alongside this package:
+
+```
+npm install @mlc-ai/web-llm   # peer dependency, only needed to serve
+```
+
+## Encryption
+
+IICP-CX (S.16) Tier-1: ephemeral **X25519** key agreement → **HKDF-SHA256** →
+**AES-256-GCM** authenticated encryption, computed with `@noble/curves` + `@noble/hashes`
+and the platform's `SubtleCrypto`. The envelope is wire-compatible with the Python,
+TypeScript, and Rust IICP clients and the provider/adapter that decrypts it.
+
+## CORS reality
+
+Discovery (`GET /api/v1/discover`) works from any `https://` page because `iicp.network`
+sends CORS headers. Routing a task to a discovered node is subject to the browser's CORS
+and mixed-content policy: an `https://` page cannot reach an `http://localhost` model, a
+node without CORS headers, or an IPv6-firewalled node. In **Node** there is no CORS
+restriction and everything works.
 
 ## License
 
-Apache-2.0. Part of the IICP project — epic #446.
+Apache-2.0. Part of the open [IICP protocol](https://github.com/RobLe3/IICP).
