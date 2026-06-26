@@ -14,9 +14,9 @@
 //
 // Epic: #446 · Dev: #447 · Research: research/wasm/WASM-1-feasibility.md (#292).
 
-/** Intent URN shape — parity with @iicp/client (SDK-02). */
-import { encryptPayload, type CxPublicKey } from "./cxConfidentiality";
+import { encryptPayload, type CxPublicKey } from "./cxConfidentiality.js";
 
+/** Intent URN shape — parity with @iicp/client (SDK-02). */
 const INTENT_RE = /^urn:iicp:intent:[a-z0-9_:/-]+$/;
 
 export const DEFAULT_DIRECTORY_URL = "https://iicp.network";
@@ -33,6 +33,8 @@ export interface DiscoverOptions {
   min_reputation?: number;
   /** Max nodes to return (directory caps at 50). */
   limit?: number;
+  /** Browser pages should keep only HTTPS/loopback endpoints. Default: true. */
+  browser_usable_only?: boolean;
 }
 
 /** A discoverable provider node (public discovery view — no tokens/endpoints private). */
@@ -43,6 +45,10 @@ export interface Node {
   reputation_score?: number;
   reputation_tier?: string;
   models?: string[];
+  directory_observed_reachable?: boolean | null;
+  route_evidence?: string;
+  routing_hint?: string;
+  browser_usable?: boolean;
   [k: string]: unknown;
 }
 
@@ -78,7 +84,9 @@ export interface TaskEnvelope {
 
 /**
  * Build the CIP consumer task envelope. Pure, deterministic (pass task_id for KAT).
- * Wire-protocol parity with the Node SDK: `POST {endpoint}/v1/task` with this body.
+ * Wire-protocol parity with the Node SDK: `POST {endpoint}/v1/task` when the caller
+ * deliberately builds a plaintext test envelope. Production chat() below is fail-closed
+ * and sends an `iicp_conf` envelope only.
  */
 export function cipConsumerEnvelope(
   messages: ChatMessage[],
@@ -112,6 +120,17 @@ export function discoverUrl(directoryUrl: string, intent: string, opts: Discover
   return `${directoryUrl.replace(/\/+$/, "")}/api/v1/discover?${params}`;
 }
 
+function isBrowserUsableEndpoint(endpoint: string): boolean {
+  try {
+    const url = new URL(endpoint);
+    if (url.protocol === "https:") return true;
+    if (url.protocol !== "http:") return false;
+    return ["localhost", "127.0.0.1", "::1"].includes(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 /** Browser-native, consumer-only IICP client. */
 export class IicpBrowserClient {
   private readonly directory: string;
@@ -142,7 +161,13 @@ export class IicpBrowserClient {
     const body = await this.getJson<{ nodes?: Node[] } | Node[]>(
       discoverUrl(this.directory, intent, opts),
     );
-    return Array.isArray(body) ? body : (body.nodes ?? []);
+    const nodes = Array.isArray(body) ? body : (body.nodes ?? []);
+    if (opts.browser_usable_only === false) return nodes;
+
+    return nodes.filter((node) => {
+      if (typeof node.browser_usable === "boolean") return node.browser_usable;
+      return isBrowserUsableEndpoint(String(node.endpoint ?? ""));
+    });
   }
 
   /** Directory mesh stats (GET /v1/stats), incl. mesh_health + active_nodes. */
@@ -165,6 +190,10 @@ export class IicpBrowserClient {
    * (`transport_endpoint: iicp://…`) — more efficient, used by the full SDKs. A browser
    * can't open raw TCP, so this client uses the HTTP transport (the discover `endpoint`).
    *
+   * Privacy: IICP-CX is fail-closed in the browser too.  A discovered node must
+   * advertise `cx_public_key` (or the temporary `public_key` alias) before this
+   * helper will send it a task.
+   *
    * ⚠ Reachability: from an https:// page the browser reaches iicp.network (discover) but
    * NOT http://localhost LLMs (mixed-content; Chrome 129+ flag only), nor a node without
    * CORS, nor an IPv6-firewalled node (today's live nodes are `ipv6_direct_firewall_required`).
@@ -174,27 +203,25 @@ export class IicpBrowserClient {
     messages: ChatMessage[],
     opts: { endpoint: string; intent?: string; model?: string; cxPublicKey?: CxPublicKey | null },
   ): Promise<Record<string, unknown>> {
-    const env = cipConsumerEnvelope(messages, { intent: opts.intent, model: opts.model });
-    // IICP-CX S.16: encryption is MANDATORY (privacy-first #360) — no opt-out. When the node
-    // advertises a cx_public_key, seal the payload into an iicp_conf envelope so the directory,
-    // relays and network see only ciphertext (byte-compatible with the node/adapter decrypt).
-    // A node with no key yet gets a loud transitional plaintext warning; fail-closed once the
-    // mesh is key-ready. Same posture as the Python/TS/Rust SDKs.
-    let body: Record<string, unknown>;
-    if (opts.cxPublicKey) {
-      body = {
-        task_id: env.task_id,
-        intent: env.intent,
-        constraints: {},
-        iicp_conf: await encryptPayload(env.payload, opts.cxPublicKey, env.task_id, env.intent),
-      };
-    } else {
-      console.warn(
-        "[iicp-cx] node advertises no encryption key — sending UNENCRYPTED " +
-          "(transitional; will be refused once the mesh is key-ready)",
+    const intent = opts.intent ?? "urn:iicp:intent:llm:chat:v1";
+    validateIntent(intent);
+    const taskId =
+      globalThis.crypto?.randomUUID?.() ?? `task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const payload = { messages, model: opts.model };
+    // IICP-CX S.16: encryption is MANDATORY (privacy-first #360) — no opt-out.
+    // Refuse keyless nodes instead of silently regressing to plaintext.
+    if (!opts.cxPublicKey) {
+      throw new IicpError(
+        "IICP-CX confidentiality required: node advertises no cx_public_key/public_key",
+        "cx_required",
       );
-      body = env as unknown as Record<string, unknown>;
     }
+    const body: Record<string, unknown> = {
+      task_id: taskId,
+      intent,
+      constraints: {},
+      iicp_conf: await encryptPayload(payload, opts.cxPublicKey, taskId, intent),
+    };
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), this.timeout);
     try {
@@ -214,9 +241,17 @@ export class IicpBrowserClient {
   }
 }
 
+/**
+ * Mask the high-entropy random subdomain of an ephemeral tunnel endpoint for
+ * display (#privacy — maintainer 2026-06-12: keep tunnel DNS names private,
+ * like node UUIDs are shown only as prefixes). The random label of a
+ * *.trycloudflare.com (or other known tunnel-provider) host is a capability
+ * secret — anyone who learns it has a direct line to the operator's machine.
+ * Routing code keeps the real URL; only human-facing surfaces mask it.
+ * Operator-chosen public domains (e.g. iicp.shaal.dev) are left intact.
+ */
 const TUNNEL_SUFFIXES = [".trycloudflare.com", ".ngrok.io", ".ngrok-free.app", ".loca.lt"];
 
-/** Mask the high-entropy subdomain of an ephemeral tunnel endpoint for display (#privacy). */
 export function maskTunnelUrl(url: string): string {
   try {
     const u = new URL(url);

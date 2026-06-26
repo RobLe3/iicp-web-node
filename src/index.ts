@@ -5,7 +5,7 @@
 // browser PROVIDER (BrowserNodeProvider — serve a model via WebLLM behind a relay), and
 // the WebLLM runtime helpers. Discovery + consume work from any https:// page; serving
 // needs a relay (see README). Parity with the Python/TS/Rust SDKs on the wire.
-export * from "./iicpConsumer";
-export * from "./cxConfidentiality";
-export * from "./browserNodeProvider";
-export * from "./webllmRuntime";
+export * from "./iicpConsumer.js";
+export * from "./cxConfidentiality.js";
+export * from "./browserNodeProvider.js";
+export * from "./webllmRuntime.js";

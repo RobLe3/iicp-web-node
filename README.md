@@ -16,6 +16,8 @@ import { IicpBrowserClient, nodeCxKey } from "@iicp/web-node";
 
 const client = new IicpBrowserClient(); // defaults to https://iicp.network
 const nodes = await client.discover("urn:iicp:intent:llm:chat:v1");
+// By default, discover() keeps only browser-usable HTTPS/loopback endpoints.
+// Pass { browser_usable_only: false } if you are running in Node and want all routes.
 
 const node = nodes[0];
 const reply = await client.chat(
@@ -26,8 +28,8 @@ const reply = await client.chat(
 
 When the chosen node advertises an encryption key (`nodeCxKey(node)`), the payload is
 **sealed end-to-end** — the directory, relays, and network see only ciphertext. There is
-no opt-out; a node not yet advertising a key triggers a loud transitional plaintext
-warning during the mesh rollout.
+no opt-out. A node that does not advertise `cx_public_key`/`public_key` is refused before
+any network send so browser use cannot silently fall back to plaintext.
 
 ## Serve — be a node from the browser
 
@@ -35,6 +37,10 @@ warning during the mesh rollout.
 import { BrowserNodeProvider, WEBLLM_MODELS, assessDevice } from "@iicp/web-node";
 // Loads a small model in-tab via WebLLM (WebGPU/WASM) and serves it behind a relay.
 ```
+
+Browser providers advertise a generated `cx_public_key`, decrypt incoming `iicp_conf`
+payloads locally, report task success/failure/latency in heartbeats, and use a relay path
+because browser tabs cannot accept raw inbound TCP.
 
 Serving requires WebLLM — add it alongside this package:
 

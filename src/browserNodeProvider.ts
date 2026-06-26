@@ -17,8 +17,9 @@
 // _heartbeat payloads, client.py chat_async() result parsing) so PUBLISHED
 // consumers route to a browser worker with zero client changes.
 
-import { maskTunnelUrl } from "./iicpConsumer";
-import type { ChatMessage } from "./iicpConsumer";
+import { maskTunnelUrl } from "./iicpConsumer.js";
+import type { ChatMessage } from "./iicpConsumer.js";
+import { createCxKeyPair, decryptPayload } from "./cxConfidentiality.js";
 
 export interface BrowserProviderRuntime {
   chat(
@@ -44,6 +45,7 @@ export interface BrowserProviderConfig {
 export type BrowserProviderState = "stopped" | "starting" | "serving" | "error";
 
 const CHAT_INTENT = "urn:iicp:intent:llm:chat:v1";
+export const BROWSER_NODE_SDK_VERSION = "0.7.71-browser";
 
 /**
  * Coarse region autodetect from the browser's timezone (no network, no
@@ -94,9 +96,10 @@ export interface DiscoveredRelay {
 /**
  * Auto-discover a browser-usable relay from the live directory (WQ-087 — the
  * web client's "automagical" rung; tabs can't spawn tunnels, so relays carry
- * them). Client-side filtering: the directory's relay_capable query param is
- * a no-op today, and discover's default limit (4) can rank fresh relays out,
- * so query wide and filter here. Browser-usable = https endpoint (or loopback
+ * them). Client-side filtering remains a hardening guard (not a dependency):
+ * the directory filter is server-side and authoritative when enabled, and query
+ * width is kept at 50 to avoid default-window clipping of relays.
+ * Browser-usable = https endpoint (or loopback
  * http for local testing — loopback is a trustworthy origin).
  *
  * Red-team F3: a malicious relay sees & can inject the tasks a browser serves
@@ -118,7 +121,7 @@ export async function discoverRelay(
   try {
     const base = directoryUrl.replace(/\/$/, "");
     const resp = await fetch(
-      `${base}/v1/discover?intent=${CHAT_INTENT}&relay_capable=true&limit=25`,
+      `${base}/v1/discover?intent=${CHAT_INTENT}&relay_capable=true&limit=50`,
     );
     if (!resp.ok) return null;
     const data = await resp.json();
@@ -129,6 +132,8 @@ export async function discoverRelay(
       reputation_score?: number;
       score?: number;
       probation?: boolean;
+      browser_usable?: boolean;
+      routing_hint?: string;
     }> = data?.nodes ?? [];
 
     const isLoopback = (ep: string) => /^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(ep);
@@ -137,7 +142,7 @@ export async function discoverRelay(
         (n) =>
           n.relay_capable === true &&
           typeof n.endpoint === "string" &&
-          (n.endpoint.startsWith("https://") || isLoopback(n.endpoint)),
+          (n.browser_usable === true || n.endpoint.startsWith("https://") || isLoopback(n.endpoint)),
       )
       .map((n) => ({
         endpoint: (n.endpoint as string).replace(/\/$/, ""),
@@ -182,6 +187,8 @@ export class BrowserNodeProvider {
   // Success/fail since the last heartbeat (reset each beat — mirrors the SDK).
   private _okSinceBeat = 0;
   private _failSinceBeat = 0;
+  private _latencyMsSinceBeat = 0;
+  private readonly _cx = createCxKeyPair();
   private _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private _stopRequested = false;
   /** True when the directory accepted the registration (mesh-discoverable). */
@@ -277,12 +284,17 @@ export class BrowserNodeProvider {
           ],
           limits: { max_concurrent: 1, tokens_per_min: 6000 },
           transport_method: "turn_relay",
+          exposure_mode: "relay_required",
           transport_metadata: {
             relay_for: this.nodeId,
             relay_transport: "http-poll",
           },
           sdk_language: "browser",
-          sdk_version: "browser-node/0.1",
+          sdk_version: BROWSER_NODE_SDK_VERSION,
+          backend: "webllm",
+          // IICP-CX S.16: browser providers are privacy-ready too.  The relay
+          // still sees metadata, but not the task payload.
+          cx_public_key: this._cx.publicKey,
         }),
       });
       if (!regResp.ok) {
@@ -365,8 +377,10 @@ export class BrowserNodeProvider {
     if (!this._nodeToken) return;
     const ok = this._okSinceBeat;
     const fail = this._failSinceBeat;
+    const latencyMs = this._latencyMsSinceBeat;
     this._okSinceBeat = 0;
     this._failSinceBeat = 0;
+    this._latencyMsSinceBeat = 0;
     const payload: Record<string, unknown> = {
       node_id: this.nodeId,
       node_token: this._nodeToken,
@@ -379,7 +393,14 @@ export class BrowserNodeProvider {
       health_models: [this.cfg.model],
     };
     if (ok > 0 || fail > 0) {
-      payload.metrics = { tasks_success: ok, tasks_failed: fail };
+      const total = ok + fail;
+      payload.metrics = {
+        tasks_success: ok,
+        tasks_failed: fail,
+        ...(latencyMs > 0 && total > 0
+          ? { avg_latency_ms: Math.round((latencyMs / total) * 100) / 100 }
+          : {}),
+      };
     }
     try {
       const resp = await fetch(`${this.directoryBase}/v1/heartbeat`, {
@@ -433,14 +454,26 @@ export class BrowserNodeProvider {
 
   private async serveCall(call: { call_id: string; task: Record<string, unknown> }): Promise<void> {
     const task = call.task ?? {};
-    const payload = (task.payload ?? {}) as {
-      messages?: ChatMessage[];
-      max_tokens?: number;
-      temperature?: number;
-    };
-    const messages = Array.isArray(payload.messages) ? payload.messages : [];
+    const taskId = String(task.task_id ?? call.call_id);
+    const intent = typeof task.intent === "string" ? task.intent : CHAT_INTENT;
     let result: Record<string, unknown>;
+    const started = performance.now();
     try {
+      let taskPayload: unknown = task.payload ?? {};
+      if (task.iicp_conf && typeof task.iicp_conf === "object") {
+        taskPayload = await decryptPayload(
+          task.iicp_conf as Record<string, unknown>,
+          this._cx.secretKey,
+          taskId,
+          intent,
+        );
+      }
+      const payload = (taskPayload ?? {}) as {
+        messages?: ChatMessage[];
+        max_tokens?: number;
+        temperature?: number;
+      };
+      const messages = Array.isArray(payload.messages) ? payload.messages : [];
       const text = await this.runtime.chat(messages, {
         ...(payload.temperature !== undefined && { temperature: payload.temperature }),
         ...(payload.max_tokens !== undefined && { max_tokens: payload.max_tokens }),
@@ -460,10 +493,12 @@ export class BrowserNodeProvider {
       };
       this._tasksServed += 1;
       this._okSinceBeat += 1;
+      this._latencyMsSinceBeat += Math.max(1, Math.round(performance.now() - started));
       this.cfg.onTaskServed?.(this._tasksServed);
       this.log(`served task ${String(task.task_id ?? call.call_id)}`);
     } catch (err) {
       this._failSinceBeat += 1;
+      this._latencyMsSinceBeat += Math.max(1, Math.round(performance.now() - started));
       result = {
         result: {
           error: {

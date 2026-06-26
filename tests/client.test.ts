@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Unit tests (#448) — no browser/network: URL builder, intent validation, CIP envelope.
+// Unit tests (#448) — no browser/network: URL builder, intent validation, browser filtering,
+// fail-closed IICP-CX, and CIP envelope KATs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -9,6 +10,17 @@ import {
   IicpError,
   DEFAULT_DIRECTORY_URL,
 } from "../src/index.ts";
+import { createCxKeyPair } from "../src/cxConfidentiality.ts";
+
+type FetchImpl = typeof globalThis.fetch;
+
+function withFetch(fn: FetchImpl, run: () => Promise<void>): Promise<void> {
+  const prev = globalThis.fetch;
+  globalThis.fetch = fn;
+  return run().finally(() => {
+    globalThis.fetch = prev;
+  });
+}
 
 test("discoverUrl builds /api/v1/discover with intent + opts, trims trailing slash", () => {
   const u = discoverUrl("https://iicp.network/", "urn:iicp:intent:llm:chat:v1", {
@@ -33,6 +45,32 @@ test("default directory is iicp.network", () => {
 test("client.discover rejects an invalid intent before any fetch", async () => {
   const c = new IicpBrowserClient({ directory_url: "https://example.test" });
   await assert.rejects(() => c.discover("bogus"), (e: unknown) => e instanceof IicpError);
+});
+
+test("client.discover filters to browser-usable endpoints by default", async () => {
+  await withFetch(async () => new Response(JSON.stringify({
+    nodes: [
+      { node_id: "https", endpoint: "https://relay.example/v1/relay-for/n", browser_usable: true },
+      { node_id: "http", endpoint: "http://203.0.113.1:9484", browser_usable: false },
+      { node_id: "loopback", endpoint: "http://127.0.0.1:9484" },
+      { node_id: "native", endpoint: "iicp://node:9484" },
+    ],
+  })), async () => {
+    const c = new IicpBrowserClient({ directory_url: "https://directory.test" });
+    const nodes = await c.discover("urn:iicp:intent:llm:chat:v1");
+    assert.deepEqual(nodes.map((n) => n.node_id), ["https", "loopback"]);
+  });
+});
+
+test("client.discover can opt out of browser-usable filtering", async () => {
+  await withFetch(async () => new Response(JSON.stringify([
+    { node_id: "https", endpoint: "https://relay.example" },
+    { node_id: "native", endpoint: "iicp://node:9484" },
+  ])), async () => {
+    const c = new IicpBrowserClient({ directory_url: "https://directory.test" });
+    const nodes = await c.discover("urn:iicp:intent:llm:chat:v1", { browser_usable_only: false });
+    assert.deepEqual(nodes.map((n) => n.node_id), ["https", "native"]);
+  });
 });
 
 // CIP consumer envelope KAT (#448) — byte-stable shape, parity with @iicp/client task wire format.
@@ -62,6 +100,35 @@ test("cipConsumerEnvelope rejects an invalid intent", () => {
     () => cipConsumerEnvelope([], { intent: "not-a-urn", task_id: "x" }),
     (e: unknown) => e instanceof IicpError,
   );
+});
+
+test("chat refuses keyless nodes before fetch", async () => {
+  let called = false;
+  await withFetch(async () => {
+    called = true;
+    return new Response("{}", { status: 200 });
+  }, async () => {
+    const c = new IicpBrowserClient({ directory_url: "https://directory.test" });
+    await assert.rejects(
+      () => c.chat([{ role: "user", content: "hi" }], { endpoint: "https://node.example" }),
+      (e: unknown) => e instanceof IicpError && e.code === "cx_required",
+    );
+    assert.equal(called, false, "fail-closed must happen before any network send");
+  });
+});
+
+test("chat sends iicp_conf and omits plaintext payload when a CX key is supplied", async () => {
+  const { publicKey } = createCxKeyPair("test");
+  let sent: Record<string, unknown> | null = null;
+  await withFetch(async (_input, init) => {
+    sent = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({ task_id: sent?.task_id, result: { ok: true }, status: "ok" }), { status: 200 });
+  }, async () => {
+    const c = new IicpBrowserClient({ directory_url: "https://directory.test" });
+    await c.chat([{ role: "user", content: "hi" }], { endpoint: "https://node.example", cxPublicKey: publicKey });
+  });
+  assert.ok(sent?.iicp_conf, "encrypted envelope expected");
+  assert.equal("payload" in (sent ?? {}), false, "plaintext payload must not be sent");
 });
 
 // Discover response normalisation — handles both {nodes:[...]} and plain [...] shapes.

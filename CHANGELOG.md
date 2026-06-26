@@ -4,6 +4,13 @@
 
 Initial public release as **@iicp/web-node** — the browser-native IICP node.
 
+### Pre-publish alignment — 2026-06-26
+- Ported the current iicp.network vendored browser implementation back into the package repo.
+- Consumer `chat()` now fails closed when a node has no `cx_public_key`/`public_key`, matching the current Python/TypeScript/Rust privacy baseline.
+- `discover()` filters to browser-usable HTTPS/loopback routes by default, with `browser_usable_only: false` for Node/full-route callers.
+- Browser providers now advertise `cx_public_key`, `exposure_mode=relay_required`, `backend=webllm`, and `sdk_version=0.7.71-browser`, decrypt incoming `iicp_conf` tasks, and heartbeat success/failure/latency metrics.
+- Added regression tests for fail-closed CX, browser route filtering, relay selection, provider registration, provider decrypt, and heartbeat metrics.
+
 ### Added
 - **Consume**: `IicpBrowserClient` — discover mesh nodes and route chat tasks from a
   browser tab or Node (`discover`, `chat`, `stats`, `registry`).

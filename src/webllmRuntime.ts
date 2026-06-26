@@ -16,7 +16,7 @@
 // is loaded dynamically in load()).
 import type { InitProgressReport } from "@mlc-ai/web-llm";
 
-import type { ChatMessage } from "./iicpConsumer";
+import type { ChatMessage } from "./iicpConsumer.js";
 
 export type { ChatMessage };
 
