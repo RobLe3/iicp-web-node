@@ -409,6 +409,10 @@ export class BrowserNodeProvider {
         headers: {
           Authorization: `Bearer ${this._nodeToken}`,
           "Content-Type": "application/json",
+          // Opaque node tokens need an explicit subject hint; JWT-backed
+          // clients can be resolved from their claims, but browser providers
+          // intentionally use the portable opaque registration credential.
+          "X-Node-Id": this.nodeId,
         },
         body: JSON.stringify({ relay_node_id: this.cfg.relayNodeId ?? "*" }),
       });
@@ -462,7 +466,11 @@ export class BrowserNodeProvider {
     try {
       await fetch(`${this.directoryBase}/v1/register`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${this._nodeToken}` },
+        headers: {
+          Authorization: `Bearer ${this._nodeToken}`,
+          // Opaque registration credentials carry no subject claim.
+          "X-Node-Id": this.nodeId,
+        },
         keepalive: true,
       });
       this.log("deregistered from directory");

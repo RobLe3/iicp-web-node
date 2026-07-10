@@ -71,6 +71,7 @@ test("start registers browser provider with CX key, relay exposure and current b
     if (url.endsWith("/v1/relay/ticket")) {
       order.push("ticket");
       assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer node-token");
+      assert.ok(new Headers(init?.headers).get("X-Node-Id"));
       return new Response(JSON.stringify({ ticket: "signed-bind-ticket" }), { status: 201 });
     }
     if (url.endsWith("/v1/heartbeat")) {
@@ -79,7 +80,11 @@ test("start registers browser provider with CX key, relay exposure and current b
     if (url.endsWith("/v1/relay/pull")) {
       return new Promise<Response>(() => undefined);
     }
-    if (url.endsWith("/v1/relay/unbind") || (url.endsWith("/v1/register") && init?.method === "DELETE")) {
+    if (url.endsWith("/v1/relay/unbind")) {
+      return new Response(JSON.stringify({ ok: true }));
+    }
+    if (url.endsWith("/v1/register") && init?.method === "DELETE") {
+      assert.ok(new Headers(init?.headers).get("X-Node-Id"));
       return new Response(JSON.stringify({ ok: true }));
     }
     throw new Error(`unexpected fetch ${url}`);

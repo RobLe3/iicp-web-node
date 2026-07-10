@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 — 2026-07-10
+
+- Fix browser-provider relay ticket issuance for opaque node credentials by sending the required `X-Node-Id` subject hint.
+
 ## 0.2.1 — 2026-07-10
 
 - Browser providers now register first, request a short-lived worker/relay-scoped bind ticket,
