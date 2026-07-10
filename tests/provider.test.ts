@@ -54,14 +54,24 @@ test("discoverRelay requests a short-lived ticket and uses its relay route", asy
 
 test("start registers browser provider with CX key, relay exposure and current browser SDK version", async () => {
   let registerBody: Record<string, any> | null = null;
+  let bindBody: Record<string, any> | null = null;
+  const order: string[] = [];
   await withFetch(async (input, init) => {
     const url = String(input);
     if (url.endsWith("/v1/relay/bind")) {
+      order.push("bind");
+      bindBody = JSON.parse(String(init?.body ?? "{}"));
       return new Response(JSON.stringify({ session_token: "relay-session" }));
     }
     if (url.endsWith("/v1/register") && init?.method === "POST") {
+      order.push("register");
       registerBody = JSON.parse(String(init.body));
       return new Response(JSON.stringify({ node_token: "node-token" }));
+    }
+    if (url.endsWith("/v1/relay/ticket")) {
+      order.push("ticket");
+      assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer node-token");
+      return new Response(JSON.stringify({ ticket: "signed-bind-ticket" }), { status: 201 });
     }
     if (url.endsWith("/v1/heartbeat")) {
       return new Response(JSON.stringify({ ok: true }));
@@ -76,6 +86,7 @@ test("start registers browser provider with CX key, relay exposure and current b
   }, async () => {
     const provider = new BrowserNodeProvider(runtime(), {
       relayUrl: "https://relay.example",
+      relayNodeId: "relay-1",
       directoryUrl: "https://directory.test/api",
       model: "Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
       region: "test-region",
@@ -91,6 +102,8 @@ test("start registers browser provider with CX key, relay exposure and current b
   assert.equal(registerBody?.sdk_version, BROWSER_NODE_SDK_VERSION);
   assert.equal(registerBody?.cx_public_key?.algorithm, "X25519");
   assert.equal(registerBody?.cx_public_key?.encoding, "base64url");
+  assert.equal(bindBody?.bind_ticket, "signed-bind-ticket");
+  assert.deepEqual(order.slice(0, 3), ["register", "ticket", "bind"]);
 });
 
 test("provider exposes deterministic recovery state transitions", async () => {
@@ -99,6 +112,7 @@ test("provider exposes deterministic recovery state transitions", async () => {
     const url = String(input);
     if (url.endsWith("/v1/relay/bind")) return new Response(JSON.stringify({ session_token: "relay-session" }));
     if (url.endsWith("/v1/register") && init?.method === "POST") return new Response(JSON.stringify({ node_token: "node-token" }));
+    if (url.endsWith("/v1/relay/ticket")) return new Response(JSON.stringify({ ticket: "signed-bind-ticket" }), { status: 201 });
     if (url.endsWith("/v1/heartbeat")) return new Response(JSON.stringify({ ok: true }));
     if (url.endsWith("/v1/relay/pull")) return new Promise<Response>(() => undefined);
     if (url.endsWith("/v1/relay/unbind") || (url.endsWith("/v1/register") && init?.method === "DELETE")) {
@@ -126,6 +140,87 @@ test("provider exposes deterministic recovery state transitions", async () => {
     "route_mismatch:reregister",
     "stable:none",
   ]);
+});
+
+test("bind failure deregisters the temporary browser node", async () => {
+  let deregistered = false;
+  await withFetch(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/v1/register") && init?.method === "POST") return new Response(JSON.stringify({ node_token: "node-token" }));
+    if (url.endsWith("/v1/relay/ticket")) return new Response(JSON.stringify({ ticket: "signed-bind-ticket" }), { status: 201 });
+    if (url.endsWith("/v1/relay/bind")) return new Response("ticket rejected", { status: 401 });
+    if (url.endsWith("/v1/register") && init?.method === "DELETE") {
+      deregistered = true;
+      return new Response(JSON.stringify({ ok: true }));
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  }, async () => {
+    const provider = new BrowserNodeProvider(runtime(), {
+      relayUrl: "https://relay.example",
+      relayNodeId: "relay-1",
+      directoryUrl: "https://directory.test/api",
+      model: "browser-model",
+    });
+    await assert.rejects(() => provider.start(), /relay bind failed: HTTP 401/);
+  });
+  assert.equal(deregistered, true);
+});
+
+test("ticket authentication failure does not downgrade to an unsigned bind", async () => {
+  let bindAttempted = false;
+  let deregistered = false;
+  await withFetch(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/v1/register") && init?.method === "POST") return new Response(JSON.stringify({ node_token: "node-token" }));
+    if (url.endsWith("/v1/relay/ticket")) return new Response("unauthorized", { status: 401 });
+    if (url.endsWith("/v1/relay/bind")) {
+      bindAttempted = true;
+      return new Response(JSON.stringify({ session_token: "should-not-bind" }));
+    }
+    if (url.endsWith("/v1/register") && init?.method === "DELETE") {
+      deregistered = true;
+      return new Response(JSON.stringify({ ok: true }));
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  }, async () => {
+    const provider = new BrowserNodeProvider(runtime(), {
+      relayUrl: "https://relay.example",
+      relayNodeId: "relay-1",
+      directoryUrl: "https://directory.test/api",
+      model: "browser-model",
+    });
+    await assert.rejects(() => provider.start(), /relay bind ticket refused: HTTP 401/);
+  });
+  assert.equal(bindAttempted, false);
+  assert.equal(deregistered, true);
+});
+
+test("explicitly unconfigured older directory may use the legacy soft bind", async () => {
+  let bindBody: Record<string, unknown> | undefined;
+  await withFetch(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/v1/register") && init?.method === "POST") return new Response(JSON.stringify({ node_token: "node-token" }));
+    if (url.endsWith("/v1/relay/ticket")) return new Response(JSON.stringify({ error: { code: "not_configured" } }), { status: 503 });
+    if (url.endsWith("/v1/relay/bind")) {
+      bindBody = JSON.parse(String(init?.body ?? "{}"));
+      return new Response(JSON.stringify({ session_token: "legacy-session" }));
+    }
+    if (url.endsWith("/v1/heartbeat")) return new Response(JSON.stringify({ ok: true }));
+    if (url.endsWith("/v1/relay/pull")) return new Promise<Response>(() => undefined);
+    if (url.endsWith("/v1/relay/unbind") || (url.endsWith("/v1/register") && init?.method === "DELETE")) {
+      return new Response(JSON.stringify({ ok: true }));
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  }, async () => {
+    const provider = new BrowserNodeProvider(runtime(), {
+      relayUrl: "https://relay.example",
+      directoryUrl: "https://directory.test/api",
+      model: "browser-model",
+    });
+    await provider.start();
+    await provider.stop();
+  });
+  assert.equal(bindBody?.bind_ticket, undefined);
 });
 
 test("missing relay is reported as operator action without exposing its full URL", async () => {

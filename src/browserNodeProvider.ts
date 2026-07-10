@@ -31,6 +31,8 @@ export interface BrowserProviderRuntime {
 export interface BrowserProviderConfig {
   /** Relay node base URL, e.g. "http://127.0.0.1:9484". Required. */
   relayUrl: string;
+  /** Auto-discovered relay node id. Used to audience-scope relay bind tickets. */
+  relayNodeId?: string;
   /** Directory API base. Default: "https://iicp.network/api". */
   directoryUrl?: string;
   /** Model name advertised to the directory (the loaded WebLLM model id). */
@@ -65,7 +67,7 @@ export interface BrowserProviderDiagnostic {
 }
 
 const CHAT_INTENT = "urn:iicp:intent:llm:chat:v1";
-export const BROWSER_NODE_SDK_VERSION = "0.7.84-browser";
+export const BROWSER_NODE_SDK_VERSION = "0.7.86-browser";
 
 /**
  * Coarse region autodetect from the browser's timezone (no network, no
@@ -272,15 +274,28 @@ export class BrowserNodeProvider {
     this.cfg.onRecoveryChange?.(this.diagnostic);
   }
 
-  /** Register → bind → start serving. Throws BrowserProviderError on failure. */
+  /** Register → obtain bind ticket → bind → serve. */
   async start(): Promise<void> {
     if (this._state === "serving" || this._state === "starting") return;
     this._stopRequested = false;
     this.setState("starting");
     this.setRecovery("tunnel_starting", "wait_cooldown");
 
-    // 1. Bind to the relay FIRST — if no relay is reachable there is no point
-    //    holding a directory registration that consumers can't route to.
+    const endpoint = `${this.relayBase}/v1/relay-for/${this.nodeId}`;
+
+    // 1. Register first. Strict relays require a directory-issued bind ticket,
+    // which in turn requires the worker's node token. A failed later bind is
+    // immediately cleaned up so this ordering does not leave stale listings.
+    await this.register(endpoint);
+
+    // 2. Obtain a short-lived worker/audience-scoped bind ticket. Only an
+    // explicit older-directory response may use the legacy soft-bind path.
+    let bindTicket = "";
+    if (this._nodeToken) {
+      bindTicket = await this.fetchBindTicket();
+    }
+
+    // 3. Bind to the relay, presenting the ticket whenever one was issued.
     let bindResp: Response;
     try {
       bindResp = await fetch(`${this.relayBase}/v1/relay/bind`, {
@@ -290,11 +305,13 @@ export class BrowserNodeProvider {
           worker_id: this.nodeId,
           intent: CHAT_INTENT,
           models: [this.cfg.model],
+          ...(bindTicket ? { bind_ticket: bindTicket } : {}),
         }),
       });
     } catch (err) {
       this.setRecovery("operator_action_needed", "operator_endpoint_needed");
       this.setState("error");
+      await this.deregisterQuietly();
       throw new BrowserProviderError(
         `relay unreachable at ${maskTunnelUrl(this.relayBase)}: ${err instanceof Error ? err.message : String(err)}`,
         "bind",
@@ -303,6 +320,7 @@ export class BrowserNodeProvider {
     if (!bindResp.ok) {
       this.setState("error");
       const detail = await bindResp.text().catch(() => "");
+      await this.deregisterQuietly();
       throw new BrowserProviderError(
         `relay bind failed: HTTP ${bindResp.status} ${detail.slice(0, 200)}`,
         "bind",
@@ -312,9 +330,18 @@ export class BrowserNodeProvider {
     this._sessionToken = bind.session_token;
     this.setRecovery("route_mismatch", "reregister");
     this.log(`relay bound — worker ${this.nodeId}`);
+    if (this.directoryListed) this.setRecovery("stable", "none");
 
-    // 2. Register with the directory, advertising the path-scoped relay endpoint.
-    const endpoint = `${this.relayBase}/v1/relay-for/${this.nodeId}`;
+    // 4. Heartbeat (only when directory-listed) + poll loop.
+    if (this.directoryListed) {
+      void this.heartbeat();
+      this._heartbeatTimer = setInterval(() => void this.heartbeat(), HEARTBEAT_MS);
+    }
+    this.setState("serving");
+    void this.pollLoop();
+  }
+
+  private async register(endpoint: string): Promise<void> {
     try {
       const regResp = await fetch(`${this.directoryBase}/v1/register`, {
         method: "POST",
@@ -358,7 +385,6 @@ export class BrowserNodeProvider {
       this._nodeToken = reg.node_token ?? reg.token ?? "";
       if (!this._nodeToken) throw new Error("directory returned no node_token");
       this.directoryListed = true;
-      this.setRecovery("stable", "none");
       this.log(`registered with directory as ${this.nodeId}`);
     } catch (err) {
       // Relay-only degradation: a rejected registration (e.g. IICP-E035
@@ -373,17 +399,50 @@ export class BrowserNodeProvider {
         }`,
       );
     }
+  }
 
-    // 3. Heartbeat (only when directory-listed) + poll loop. Fire one
-    // immediately so the directory sees us as available without waiting a
-    // full interval, then keep alive every 30 s while the tab is open and the
-    // model stays loaded.
-    if (this.directoryListed) {
-      void this.heartbeat();
-      this._heartbeatTimer = setInterval(() => void this.heartbeat(), HEARTBEAT_MS);
+  private async fetchBindTicket(): Promise<string> {
+    let resp: Response;
+    try {
+      resp = await fetch(`${this.directoryBase}/v1/relay/ticket`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this._nodeToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ relay_node_id: this.cfg.relayNodeId ?? "*" }),
+      });
+    } catch (err) {
+      await this.deregisterQuietly();
+      this.setState("error");
+      throw new BrowserProviderError(
+        `relay bind ticket request failed: ${err instanceof Error ? err.message : String(err)}`,
+        "bind",
+      );
     }
-    this.setState("serving");
-    void this.pollLoop();
+
+    if (resp.ok) {
+      const body = await resp.json();
+      if (typeof body.ticket !== "string" || !body.ticket) {
+        await this.deregisterQuietly();
+        throw new BrowserProviderError("directory returned no relay bind ticket", "bind");
+      }
+      return body.ticket;
+    }
+
+    const detail = await resp.text().catch(() => "");
+    const legacy = resp.status === 404 || (resp.status === 503 && detail.includes("not_configured"));
+    if (legacy) {
+      this.log("directory has no relay bind-ticket service — trying legacy soft bind");
+      return "";
+    }
+
+    await this.deregisterQuietly();
+    this.setState("error");
+    throw new BrowserProviderError(
+      `relay bind ticket refused: HTTP ${resp.status} ${detail.slice(0, 200)}`,
+      "bind",
+    );
   }
 
   /** Unbind from the relay and deregister from the directory. */
@@ -394,20 +453,24 @@ export class BrowserNodeProvider {
       this._heartbeatTimer = null;
     }
     await this.unbindQuietly();
-    if (this._nodeToken) {
-      try {
-        await fetch(`${this.directoryBase}/v1/register`, {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${this._nodeToken}` },
-          keepalive: true,
-        });
-        this.log("deregistered from directory");
-      } catch {
-        // best-effort — heartbeat expiry cleans up server-side
-      }
-      this._nodeToken = "";
-    }
+    await this.deregisterQuietly();
     this.setState("stopped");
+  }
+
+  private async deregisterQuietly(): Promise<void> {
+    if (!this._nodeToken) return;
+    try {
+      await fetch(`${this.directoryBase}/v1/register`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${this._nodeToken}` },
+        keepalive: true,
+      });
+      this.log("deregistered from directory");
+    } catch {
+      // best-effort — heartbeat expiry cleans up server-side
+    }
+    this._nodeToken = "";
+    this.directoryListed = false;
   }
 
   private async unbindQuietly(): Promise<void> {

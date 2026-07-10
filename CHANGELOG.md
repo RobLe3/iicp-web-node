@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 — 2026-07-10
+
+- Browser providers now register first, request a short-lived worker/relay-scoped bind ticket,
+  and present it to the relay before serving.
+- Authentication, ticket, and bind failures fail closed and clean up temporary directory
+  registrations; compatibility fallback is limited to explicitly older directories.
+- The website integration now passes the discovered relay node ID for audience-scoped tickets.
+
 ## 0.2.0 — 2026-07-10
 
 - Prefer short-lived ticketed dispatch with controlled legacy-directory fallback.

@@ -47,6 +47,12 @@ Browser providers advertise a generated `cx_public_key`, decrypt incoming `iicp_
 payloads locally, report task success/failure/latency in heartbeats, and use a relay path
 because browser tabs cannot accept raw inbound TCP.
 
+Startup is intentionally ticketed: the provider registers, requests a short-lived relay
+bind ticket scoped to its worker and selected relay, and presents that ticket when it binds.
+Authentication or validation failures stop serving and clean up the temporary directory
+registration instead of silently falling back to an unsigned bind. Compatibility fallback
+is limited to directories that explicitly report that the ticket service is unavailable.
+
 Provider state includes deterministic recovery diagnostics (`stable`, `tunnel_starting`,
 `route_mismatch`, `operator_action_needed`, or `unavailable`) so a host page can explain
 whether it is directory-listed and relay-bound. Browser lifetime still matters: closing or
