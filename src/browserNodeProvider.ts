@@ -40,12 +40,32 @@ export interface BrowserProviderConfig {
   /** Called after each served task with the running total. */
   onTaskServed?: (total: number) => void;
   onStateChange?: (state: BrowserProviderState) => void;
+  onRecoveryChange?: (diagnostic: BrowserProviderDiagnostic) => void;
 }
 
 export type BrowserProviderState = "stopped" | "starting" | "serving" | "error";
+export type BrowserProviderRecoveryState =
+  | "stable"
+  | "tunnel_starting"
+  | "route_mismatch"
+  | "operator_action_needed"
+  | "unavailable";
+export type BrowserProviderRecoveryAction =
+  | "none"
+  | "reregister"
+  | "wait_cooldown"
+  | "operator_endpoint_needed";
+
+export interface BrowserProviderDiagnostic {
+  recovery_state: BrowserProviderRecoveryState;
+  recovery_action: BrowserProviderRecoveryAction;
+  directory_listed: boolean;
+  relay_bound: boolean;
+  tasks_served: number;
+}
 
 const CHAT_INTENT = "urn:iicp:intent:llm:chat:v1";
-export const BROWSER_NODE_SDK_VERSION = "0.7.71-browser";
+export const BROWSER_NODE_SDK_VERSION = "0.7.84-browser";
 
 /**
  * Coarse region autodetect from the browser's timezone (no network, no
@@ -120,11 +140,14 @@ export async function discoverRelay(
 ): Promise<DiscoveredRelay | null> {
   try {
     const base = directoryUrl.replace(/\/$/, "");
-    const resp = await fetch(
-      `${base}/v1/discover?intent=${CHAT_INTENT}&relay_capable=true&limit=50`,
-    );
+    const resp = await fetch(`${base}/v1/dispatch/ticket`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ intent: CHAT_INTENT, relay_capable: true, limit: 1 }),
+    });
     if (!resp.ok) return null;
     const data = await resp.json();
+    const route = data?.route;
     const nodes: Array<{
       relay_capable?: boolean;
       endpoint?: string;
@@ -134,7 +157,9 @@ export async function discoverRelay(
       probation?: boolean;
       browser_usable?: boolean;
       routing_hint?: string;
-    }> = data?.nodes ?? [];
+    }> = route && typeof route === "object"
+      ? [{ ...route, node_id: data?.node_id, relay_capable: true }]
+      : [];
 
     const isLoopback = (ep: string) => /^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(ep);
     const usable = nodes
@@ -191,6 +216,8 @@ export class BrowserNodeProvider {
   private readonly _cx = createCxKeyPair();
   private _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private _stopRequested = false;
+  private _recoveryState: BrowserProviderRecoveryState = "unavailable";
+  private _recoveryAction: BrowserProviderRecoveryAction = "operator_endpoint_needed";
   /** True when the directory accepted the registration (mesh-discoverable). */
   directoryListed = false;
 
@@ -207,6 +234,16 @@ export class BrowserNodeProvider {
 
   get tasksServed(): number {
     return this._tasksServed;
+  }
+
+  get diagnostic(): BrowserProviderDiagnostic {
+    return {
+      recovery_state: this._recoveryState,
+      recovery_action: this._recoveryAction,
+      directory_listed: this.directoryListed,
+      relay_bound: Boolean(this._sessionToken),
+      tasks_served: this._tasksServed,
+    };
   }
 
   private get directoryBase(): string {
@@ -226,11 +263,21 @@ export class BrowserNodeProvider {
     this.cfg.onStateChange?.(s);
   }
 
+  private setRecovery(
+    state: BrowserProviderRecoveryState,
+    action: BrowserProviderRecoveryAction,
+  ): void {
+    this._recoveryState = state;
+    this._recoveryAction = action;
+    this.cfg.onRecoveryChange?.(this.diagnostic);
+  }
+
   /** Register → bind → start serving. Throws BrowserProviderError on failure. */
   async start(): Promise<void> {
     if (this._state === "serving" || this._state === "starting") return;
     this._stopRequested = false;
     this.setState("starting");
+    this.setRecovery("tunnel_starting", "wait_cooldown");
 
     // 1. Bind to the relay FIRST — if no relay is reachable there is no point
     //    holding a directory registration that consumers can't route to.
@@ -246,6 +293,7 @@ export class BrowserNodeProvider {
         }),
       });
     } catch (err) {
+      this.setRecovery("operator_action_needed", "operator_endpoint_needed");
       this.setState("error");
       throw new BrowserProviderError(
         `relay unreachable at ${maskTunnelUrl(this.relayBase)}: ${err instanceof Error ? err.message : String(err)}`,
@@ -262,6 +310,7 @@ export class BrowserNodeProvider {
     }
     const bind = await bindResp.json();
     this._sessionToken = bind.session_token;
+    this.setRecovery("route_mismatch", "reregister");
     this.log(`relay bound — worker ${this.nodeId}`);
 
     // 2. Register with the directory, advertising the path-scoped relay endpoint.
@@ -291,7 +340,11 @@ export class BrowserNodeProvider {
           },
           sdk_language: "browser",
           sdk_version: BROWSER_NODE_SDK_VERSION,
-          backend: "webllm",
+          // The current directory contract accepts native backend identifiers
+          // plus "custom". Browser/WebLLM providers are non-native providers,
+          // so advertise them as custom until the protocol taxonomy grows a
+          // dedicated browser backend token.
+          backend: "custom",
           // IICP-CX S.16: browser providers are privacy-ready too.  The relay
           // still sees metadata, but not the task payload.
           cx_public_key: this._cx.publicKey,
@@ -305,6 +358,7 @@ export class BrowserNodeProvider {
       this._nodeToken = reg.node_token ?? reg.token ?? "";
       if (!this._nodeToken) throw new Error("directory returned no node_token");
       this.directoryListed = true;
+      this.setRecovery("stable", "none");
       this.log(`registered with directory as ${this.nodeId}`);
     } catch (err) {
       // Relay-only degradation: a rejected registration (e.g. IICP-E035
@@ -312,6 +366,7 @@ export class BrowserNodeProvider {
       // node is not mesh-discoverable, but consumers that know the relay
       // endpoint can still dispatch — keep serving and say so plainly.
       this.directoryListed = false;
+      this.setRecovery("route_mismatch", "reregister");
       this.log(
         `directory registration rejected — serving relay-only (not discoverable): ${
           err instanceof Error ? err.message : String(err)
@@ -371,6 +426,7 @@ export class BrowserNodeProvider {
       // best-effort — relay liveness window GCs the session
     }
     this._sessionToken = "";
+    if (!this._stopRequested) this.setRecovery("operator_action_needed", "operator_endpoint_needed");
   }
 
   private async heartbeat(): Promise<void> {
@@ -416,9 +472,11 @@ export class BrowserNodeProvider {
           `keep-alive ✓ (model loaded${ok || fail ? `, +${ok} ok / +${fail} fail` : ""})`,
         );
       } else {
+        this.setRecovery("route_mismatch", "reregister");
         this.log(`keep-alive → HTTP ${resp.status}`);
       }
     } catch {
+      this.setRecovery("route_mismatch", "reregister");
       this.log("keep-alive failed (transient)");
     }
   }
@@ -438,6 +496,7 @@ export class BrowserNodeProvider {
       if (resp.status === 204) continue; // idle window — poll again
       if (resp.status === 401) {
         // Session displaced or GC'd — stop serving rather than fight over the id.
+        this.setRecovery("operator_action_needed", "operator_endpoint_needed");
         this.log("relay session expired — stopping");
         await this.stop();
         this.setState("error");
@@ -480,6 +539,7 @@ export class BrowserNodeProvider {
       });
       // OpenAI-shape choices — exactly what SDK consumers' chat() parses.
       result = {
+        generated_by_ai: true,
         result: {
           choices: [
             {

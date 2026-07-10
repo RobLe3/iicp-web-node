@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 — 2026-07-10
+
+- Prefer short-lived ticketed dispatch with controlled legacy-directory fallback.
+- Add strict region and policy-manifest routing guards, redacted receipts, intent-risk refusal,
+  and explicit AI-generated response metadata.
+- Align browser-provider registration with the directory backend taxonomy (`custom`).
+- Add deterministic provider recovery diagnostics and ticketed relay discovery.
+- Preserve the existing fail-closed IICP-CX behavior and task-envelope compatibility helper.
+
 ## [0.1.0] — 2026-06-13
 
 Initial public release as **@iicp/web-node** — the browser-native IICP node.

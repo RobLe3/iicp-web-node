@@ -1,6 +1,6 @@
 {
   "name": "@iicp/web-node",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Browser-native IICP node (consume + serve): discovery-mesh client with mandatory E2E encryption (IICP-CX) + WebLLM provider. Zero-config, ESM.",
   "type": "module",
   "main": "dist/index.js",

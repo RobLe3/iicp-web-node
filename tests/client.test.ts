@@ -56,7 +56,7 @@ test("client.discover filters to browser-usable endpoints by default", async () 
       { node_id: "native", endpoint: "iicp://node:9484" },
     ],
   })), async () => {
-    const c = new IicpBrowserClient({ directory_url: "https://directory.test" });
+    const c = new IicpBrowserClient({ directory_url: "https://directory.test", route_discovery_mode: "legacy" });
     const nodes = await c.discover("urn:iicp:intent:llm:chat:v1");
     assert.deepEqual(nodes.map((n) => n.node_id), ["https", "loopback"]);
   });
@@ -67,9 +67,62 @@ test("client.discover can opt out of browser-usable filtering", async () => {
     { node_id: "https", endpoint: "https://relay.example" },
     { node_id: "native", endpoint: "iicp://node:9484" },
   ])), async () => {
-    const c = new IicpBrowserClient({ directory_url: "https://directory.test" });
+    const c = new IicpBrowserClient({ directory_url: "https://directory.test", route_discovery_mode: "legacy" });
     const nodes = await c.discover("urn:iicp:intent:llm:chat:v1", { browser_usable_only: false });
     assert.deepEqual(nodes.map((n) => n.node_id), ["https", "native"]);
+  });
+});
+
+test("client.discover prefers ticketed dispatch and records the ticket prefix", async () => {
+  let sent: Record<string, unknown> | null = null;
+  await withFetch(async (_input, init) => {
+    sent = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      node_id: "ticketed-node",
+      ticket_id_prefix: "ticket12",
+      route: { endpoint: "https://relay.example/v1/relay-for/ticketed-node", browser_usable: true },
+    }), { status: 201 });
+  }, async () => {
+    const c = new IicpBrowserClient({ directory_url: "https://directory.test", route_discovery_mode: "ticketed" });
+    const nodes = await c.discover("urn:iicp:intent:llm:chat:v1", { limit: 1 });
+    assert.equal(sent?.intent, "urn:iicp:intent:llm:chat:v1");
+    assert.equal(nodes[0]?.node_id, "ticketed-node");
+    assert.equal(nodes[0]?.dispatch_ticket_id_prefix, "ticket12");
+  });
+});
+
+test("client refuses prohibited and declared high-risk intents before discovery", async () => {
+  let called = false;
+  await withFetch(async () => {
+    called = true;
+    return new Response("{}", { status: 200 });
+  }, async () => {
+    const c = new IicpBrowserClient({ directory_url: "https://directory.test" });
+    await assert.rejects(
+      () => c.discover("urn:iicp:intent:social-scoring:v1"),
+      (e: unknown) => e instanceof IicpError && e.code === "intent_policy_refused",
+    );
+    await assert.rejects(
+      () => c.discover("urn:iicp:intent:employment:hiring:v1"),
+      (e: unknown) => e instanceof IicpError && e.code === "intent_policy_refused",
+    );
+  });
+  assert.equal(called, false);
+});
+
+test("strict region policy excludes a ticketed route outside the allowlist", async () => {
+  await withFetch(async () => new Response(JSON.stringify({
+    node_id: "us-node",
+    ticket_id_prefix: "ticket34",
+    route: { endpoint: "https://us.example", browser_usable: true, region: "us-east" },
+  }), { status: 201 }), async () => {
+    const c = new IicpBrowserClient({
+      directory_url: "https://directory.test",
+      route_discovery_mode: "ticketed",
+      allowed_regions: ["eu-central"],
+    });
+    const nodes = await c.discover("urn:iicp:intent:llm:chat:v1", { limit: 1 });
+    assert.deepEqual(nodes, []);
   });
 });
 
