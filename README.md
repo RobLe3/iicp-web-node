@@ -2,8 +2,8 @@
 
 Browser-native **IICP node** for the [IICP](https://iicp.network) mesh — **consume** AI
 from the network *and* **serve** a model from a browser tab. ESM, built on the platform's
-native `fetch` / `SubtleCrypto` / WebGPU (and runs in Node ≥18). End-to-end payload
-encryption is **mandatory** and on by default.
+native `fetch` / `SubtleCrypto` / WebGPU (and runs in Node ≥18). The browser
+client refuses keyless providers rather than silently sending plaintext.
 
 ```
 npm install @iicp/web-node
@@ -47,6 +47,9 @@ Browser providers advertise a generated `cx_public_key`, decrypt incoming `iicp_
 payloads locally, report task success/failure/latency in heartbeats, and use a relay path
 because browser tabs cannot accept raw inbound TCP.
 
+Browser provider mode is experimental. Tab lifetime, relay availability,
+browser policy and device resources make it unsuitable for unattended service.
+
 Startup is intentionally ticketed: the provider registers, requests a short-lived relay
 bind ticket scoped to its worker and selected relay, and presents that ticket when it binds.
 Authentication or validation failures stop serving and clean up the temporary directory
@@ -82,3 +85,9 @@ restriction and everything works.
 ## License
 
 Apache-2.0. Part of the open [IICP protocol](https://github.com/RobLe3/IICP).
+
+## Documentation
+
+- [Connect an AI agent](https://github.com/RobLe3/IICP/blob/main/docs/agent-bootstrap.md)
+- [Browser-node guide](https://iicp.network/browser-node)
+- [Official implementation registry](https://github.com/RobLe3/IICP/blob/main/IMPLEMENTATIONS.md)
