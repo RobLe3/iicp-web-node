@@ -9,3 +9,4 @@ export * from "./iicpConsumer.js";
 export * from "./cxConfidentiality.js";
 export * from "./browserNodeProvider.js";
 export * from "./webllmRuntime.js";
+export * from "./version.js";

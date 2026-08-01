@@ -5,7 +5,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   BrowserNodeProvider,
+  BROWSER_NODE_SDK_COMPATIBILITY_VERSION,
   BROWSER_NODE_SDK_VERSION,
+  BROWSER_NODE_VERSION,
   discoverRelay,
   encryptPayload,
   type BrowserProviderRuntime,
@@ -105,6 +107,12 @@ test("start registers browser provider with CX key, relay exposure and current b
   assert.equal(registerBody?.backend, "custom");
   assert.equal(registerBody?.sdk_language, "browser");
   assert.equal(registerBody?.sdk_version, BROWSER_NODE_SDK_VERSION);
+  assert.equal(registerBody?.implementation_name, "@iicp/web-node");
+  assert.equal(registerBody?.implementation_version, BROWSER_NODE_VERSION);
+  assert.equal(
+    registerBody?.sdk_compatibility_version,
+    BROWSER_NODE_SDK_COMPATIBILITY_VERSION,
+  );
   assert.equal(registerBody?.cx_public_key?.algorithm, "X25519");
   assert.equal(registerBody?.cx_public_key?.encoding, "base64url");
   assert.equal(bindBody?.bind_ticket, "signed-bind-ticket");

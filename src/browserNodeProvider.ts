@@ -20,6 +20,11 @@
 import { maskTunnelUrl } from "./iicpConsumer.js";
 import type { ChatMessage } from "./iicpConsumer.js";
 import { createCxKeyPair, decryptPayload } from "./cxConfidentiality.js";
+import {
+  BROWSER_NODE_SDK_COMPATIBILITY_VERSION,
+  BROWSER_NODE_SDK_VERSION,
+  BROWSER_NODE_VERSION,
+} from "./version.js";
 
 export interface BrowserProviderRuntime {
   chat(
@@ -67,7 +72,7 @@ export interface BrowserProviderDiagnostic {
 }
 
 const CHAT_INTENT = "urn:iicp:intent:llm:chat:v1";
-export const BROWSER_NODE_SDK_VERSION = "0.7.86-browser";
+export { BROWSER_NODE_SDK_VERSION } from "./version.js";
 
 /**
  * Coarse region autodetect from the browser's timezone (no network, no
@@ -366,7 +371,14 @@ export class BrowserNodeProvider {
             relay_transport: "http-poll",
           },
           sdk_language: "browser",
+          // Old directories retain sdk_version as the compatibility fallback.
           sdk_version: BROWSER_NODE_SDK_VERSION,
+          // Newer projections can expose the implementation and compatibility
+          // axes independently. Unknown registration fields are safely ignored
+          // by older directory releases.
+          implementation_name: "@iicp/web-node",
+          implementation_version: BROWSER_NODE_VERSION,
+          sdk_compatibility_version: BROWSER_NODE_SDK_COMPATIBILITY_VERSION,
           // The current directory contract accepts native backend identifiers
           // plus "custom". Browser/WebLLM providers are non-native providers,
           // so advertise them as custom until the protocol taxonomy grows a
