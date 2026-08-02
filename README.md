@@ -67,6 +67,13 @@ Serving requires WebLLM — add it alongside this package:
 npm install @mlc-ai/web-llm   # peer dependency, only needed to serve
 ```
 
+## Version metadata
+
+Browser package identity and directory compatibility are separate values. Provider
+registration reports `implementation_name=@iicp/web-node`, the package
+`implementation_version`, and `sdk_compatibility_version`; the legacy
+`sdk_version` field remains the compatibility alias for older directories.
+
 ## Encryption
 
 IICP-CX (S.16) Tier-1: ephemeral **X25519** key agreement → **HKDF-SHA256** →

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.3 — 2026-08-02
+
+- Separate the browser implementation/package version from its IICP SDK compatibility version.
+- Register additive `implementation_name`, `implementation_version`, and
+  `sdk_compatibility_version` fields while retaining `sdk_version` for older directories.
+- Add one bounded quality workflow and a content-free build provenance manifest.
+- No task payload, encryption, relay, or browser execution semantics changed.
+
 ## 0.2.2 — 2026-07-10
 
 - Fix browser-provider relay ticket issuance for opaque node credentials by sending the required `X-Node-Id` subject hint.
