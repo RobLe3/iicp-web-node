@@ -18,6 +18,7 @@
 // Epic: #446 · Dev: #447 · Research: research/wasm/WASM-1-feasibility.md (#292).
 
 import { encryptPayload, type CxPublicKey } from "./cxConfidentiality.js";
+import { verifyDispatchTicket } from "./dispatchTicket.js";
 
 const REFUSED_INTENT_RULES = [
   { category: "prohibited", rule_id: "eu-ai-act-social-scoring", label: "social scoring", fragments: ["social-scoring", "social_scoring", "social:scoring"] },
@@ -454,6 +455,7 @@ export class IicpBrowserClient {
   private readonly allowedRegions: string[];
   private readonly requiredManifestIdentityLevel?: RequiredManifestIdentityLevel;
   private readonly routeDiscoveryMode: "auto" | "ticketed" | "legacy";
+  private dispatchTicketKey?: string;
 
   constructor(cfg: ClientConfig = {}) {
     this.directory = (cfg.directory_url ?? DEFAULT_DIRECTORY_URL).replace(/\/+$/, "");
@@ -517,6 +519,23 @@ export class IicpBrowserClient {
         const route = body.route as Record<string, unknown> | undefined;
         if (!route || typeof body.node_id !== "string") {
           throw new IicpError("ticketed route response is malformed", "ticket_malformed");
+        }
+        if (!this.dispatchTicketKey) {
+          const keyResponse = await fetch(`${this.directory}/api/v1/directory-key`, {
+            headers: { Accept: "application/json" },
+            signal: AbortSignal.timeout(this.timeout),
+          });
+          const keyBody = await keyResponse.json().catch(() => ({})) as Record<string, unknown>;
+          if (keyResponse.status === 200 && typeof keyBody.public_key === "string") {
+            this.dispatchTicketKey = keyBody.public_key;
+          }
+        }
+        const issuer = this.directory.replace(/\/api$/, "");
+        const claims = typeof body.ticket === "string" && this.dispatchTicketKey
+          ? verifyDispatchTicket(body.ticket, this.dispatchTicketKey, issuer, body.node_id, intent)
+          : null;
+        if (!claims) {
+          throw new IicpError("directory returned an unverifiable dispatch ticket", "ticket_unverified");
         }
         const node = {
           ...route,

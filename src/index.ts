@@ -6,6 +6,7 @@
 // the WebLLM runtime helpers. Discovery + consume work from any https:// page; serving
 // needs a relay (see README). Parity with the Python/TS/Rust SDKs on the wire.
 export * from "./iicpConsumer.js";
+export * from "./dispatchTicket.js";
 export * from "./cxConfidentiality.js";
 export * from "./browserNodeProvider.js";
 export * from "./webllmRuntime.js";

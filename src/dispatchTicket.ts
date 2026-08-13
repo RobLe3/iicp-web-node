@@ -1,0 +1,6 @@
+import { ed25519 } from "@noble/curves/ed25519.js";
+import { hexToBytes } from "@noble/hashes/utils.js";
+const DOMAIN = "iicp:dispatch-route-ticket:v1\n";
+export interface DispatchTicketClaims { v:number; typ:string; iss:string; aud:string; jti:string; node_id:string; intent:string; iat:number; exp:number; }
+function b64(value:string): Uint8Array { const text=value.replace(/-/g,"+").replace(/_/g,"/")+"=".repeat((4-value.length%4)%4); const raw=atob(text); return Uint8Array.from(raw,c=>c.charCodeAt(0)); }
+export function verifyDispatchTicket(token:string,keyHex:string,issuer:string,nodeId:string,intent:string,nowSec=Math.floor(Date.now()/1000)): DispatchTicketClaims | null { const [payload,sig,...extra]=token.split("."); if(!payload||!sig||extra.length||sig.length!==128)return null; try { if(!ed25519.verify(hexToBytes(sig),new TextEncoder().encode(DOMAIN+payload),hexToBytes(keyHex)))return null; const c=JSON.parse(new TextDecoder().decode(b64(payload))) as DispatchTicketClaims; return c.v===1&&c.typ==="dispatch-route-ticket"&&c.iss===issuer&&c.aud==="iicp.directory.dispatch"&&c.node_id===nodeId&&c.intent===intent&&c.exp>nowSec&&/^[0-9a-f]{24}$/.test(c.jti)?c:null; } catch{return null;} }

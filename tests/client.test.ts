@@ -3,6 +3,7 @@
 // fail-closed IICP-CX, and CIP envelope KATs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   discoverUrl,
   cipConsumerEnvelope,
@@ -73,22 +74,54 @@ test("client.discover can opt out of browser-usable filtering", async () => {
   });
 });
 
-test("client.discover prefers ticketed dispatch and records the ticket prefix", async () => {
+test("client.discover verifies ticketed dispatch and records only the ticket prefix", async () => {
+  const fixture = JSON.parse(readFileSync(new URL("../parity/dispatch-route-ticket-v1.json", import.meta.url), "utf8"));
   let sent: Record<string, unknown> | null = null;
-  await withFetch(async (_input, init) => {
+  await withFetch(async (input, init) => {
+    const url = input.toString();
+    if (url.endsWith("/v1/directory-key")) {
+      return new Response(JSON.stringify({ public_key: fixture.public_key_hex }), { status: 200 });
+    }
     sent = JSON.parse(String(init?.body ?? "{}"));
     return new Response(JSON.stringify({
-      node_id: "ticketed-node",
+      ticket: fixture.valid.token,
+      node_id: fixture.valid.claims.node_id,
       ticket_id_prefix: "ticket12",
       route: { endpoint: "https://relay.example/v1/relay-for/ticketed-node", browser_usable: true },
     }), { status: 201 });
   }, async () => {
-    const c = new IicpBrowserClient({ directory_url: "https://directory.test", route_discovery_mode: "ticketed" });
+    const c = new IicpBrowserClient({ directory_url: fixture.valid.claims.iss, route_discovery_mode: "ticketed" });
     const nodes = await c.discover("urn:iicp:intent:llm:chat:v1", { limit: 1 });
     assert.equal(sent?.intent, "urn:iicp:intent:llm:chat:v1");
-    assert.equal(nodes[0]?.node_id, "ticketed-node");
+    assert.equal(nodes[0]?.node_id, fixture.valid.claims.node_id);
     assert.equal(nodes[0]?.dispatch_ticket_id_prefix, "ticket12");
+    assert.equal(JSON.stringify(nodes).includes(fixture.valid.token), false);
   });
+});
+
+test("client.discover refuses an unverifiable ticket without legacy downgrade", async () => {
+  const fixture = JSON.parse(readFileSync(new URL("../parity/dispatch-route-ticket-v1.json", import.meta.url), "utf8"));
+  let legacyCalled = false;
+  await withFetch(async (input) => {
+    const url = input.toString();
+    if (url.includes("/v1/discover")) legacyCalled = true;
+    if (url.endsWith("/v1/directory-key")) {
+      return new Response(JSON.stringify({ public_key: fixture.public_key_hex }), { status: 200 });
+    }
+    return new Response(JSON.stringify({
+      ticket: fixture.valid.token,
+      // The valid signature is deliberately paired with the wrong selected node.
+      node_id: "node-other",
+      route: { endpoint: "https://relay.example/v1/relay-for/ticketed-node", browser_usable: true },
+    }), { status: 201 });
+  }, async () => {
+    const c = new IicpBrowserClient({ directory_url: fixture.valid.claims.iss, route_discovery_mode: "auto" });
+    await assert.rejects(
+      () => c.discover("urn:iicp:intent:llm:chat:v1", { limit: 1 }),
+      (error: unknown) => error instanceof IicpError && error.code === "ticket_unverified",
+    );
+  });
+  assert.equal(legacyCalled, false);
 });
 
 test("client refuses prohibited and declared high-risk intents before discovery", async () => {
@@ -110,14 +143,21 @@ test("client refuses prohibited and declared high-risk intents before discovery"
   assert.equal(called, false);
 });
 
-test("strict region policy excludes a ticketed route outside the allowlist", async () => {
-  await withFetch(async () => new Response(JSON.stringify({
-    node_id: "us-node",
-    ticket_id_prefix: "ticket34",
-    route: { endpoint: "https://us.example", browser_usable: true, region: "us-east" },
-  }), { status: 201 }), async () => {
+test("strict region policy excludes a verified ticketed route outside the allowlist", async () => {
+  const fixture = JSON.parse(readFileSync(new URL("../parity/dispatch-route-ticket-v1.json", import.meta.url), "utf8"));
+  await withFetch(async (input) => {
+    if (input.toString().endsWith("/v1/directory-key")) {
+      return new Response(JSON.stringify({ public_key: fixture.public_key_hex }), { status: 200 });
+    }
+    return new Response(JSON.stringify({
+      ticket: fixture.valid.token,
+      node_id: fixture.valid.claims.node_id,
+      ticket_id_prefix: "ticket34",
+      route: { endpoint: "https://us.example", browser_usable: true, region: "us-east" },
+    }), { status: 201 });
+  }, async () => {
     const c = new IicpBrowserClient({
-      directory_url: "https://directory.test",
+      directory_url: fixture.valid.claims.iss,
       route_discovery_mode: "ticketed",
       allowed_regions: ["eu-central"],
     });

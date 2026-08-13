@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Verify directory-signed dispatch tickets in the browser consumer before exposing route material.
+- Fail closed on invalid or missing ticket evidence without silently downgrading to legacy discovery.
+- Consume the canonical dispatch-ticket fixture used by the three server SDKs.
+- Advance the browser provider compatibility declaration to SDK contract `0.7.102`.
+
 ## 0.2.3 — 2026-08-02
 
 - Separate the browser implementation/package version from its IICP SDK compatibility version.
