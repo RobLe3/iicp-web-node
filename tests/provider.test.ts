@@ -9,6 +9,7 @@ import {
   BROWSER_NODE_SDK_VERSION,
   BROWSER_NODE_VERSION,
   discoverRelay,
+  advertisedBrowserCapabilities,
   encryptPayload,
   type BrowserProviderRuntime,
 } from "../src/index.ts";
@@ -33,6 +34,20 @@ function runtime(reply = "ok"): BrowserProviderRuntime {
     },
   };
 }
+
+test("explicit effective variants replace the legacy browser advertisement", () => {
+  const explicit = [{
+    intent: "urn:iicp:intent:llm:chat:v1",
+    variant_id: "browser-vision",
+    models: ["custom-browser-model"],
+    input_modalities: ["text", "image"],
+    claim_provenance: { source: "runtime_introspection" as const },
+  }];
+  assert.deepEqual(
+    advertisedBrowserCapabilities(explicit, "legacy-browser-model"),
+    explicit,
+  );
+});
 
 test("discoverRelay requests a short-lived ticket and uses its relay route", async () => {
   let url = "";
@@ -117,6 +132,48 @@ test("start registers browser provider with CX key, relay exposure and current b
   assert.equal(registerBody?.cx_public_key?.encoding, "base64url");
   assert.equal(bindBody?.bind_ticket, "signed-bind-ticket");
   assert.deepEqual(order.slice(0, 3), ["register", "ticket", "bind"]);
+});
+
+test("start sends configured effective capability variants to the directory", async () => {
+  let registerBody: Record<string, any> | null = null;
+  const effectiveCapabilities = [{
+    intent: "urn:iicp:intent:llm:chat:v1",
+    variant_id: "browser-vision",
+    models: ["custom-browser-model"],
+    input_modalities: ["text", "image"],
+    output_modalities: ["text"],
+    claim_provenance: { source: "runtime_introspection" as const },
+  }];
+  await withFetch(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/v1/register") && init?.method === "POST") {
+      registerBody = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ node_token: "node-token" }));
+    }
+    if (url.endsWith("/v1/relay/ticket")) {
+      return new Response(JSON.stringify({ ticket: "signed-bind-ticket" }), { status: 201 });
+    }
+    if (url.endsWith("/v1/relay/bind")) {
+      return new Response(JSON.stringify({ session_token: "relay-session" }));
+    }
+    if (url.endsWith("/v1/heartbeat")) return new Response(JSON.stringify({ ok: true }));
+    if (url.endsWith("/v1/relay/pull")) return new Promise<Response>(() => undefined);
+    if (url.endsWith("/v1/relay/unbind") || (url.endsWith("/v1/register") && init?.method === "DELETE")) {
+      return new Response(JSON.stringify({ ok: true }));
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  }, async () => {
+    const provider = new BrowserNodeProvider(runtime(), {
+      relayUrl: "https://relay.example",
+      relayNodeId: "relay-1",
+      directoryUrl: "https://directory.test/api",
+      model: "legacy-browser-model",
+      effectiveCapabilities,
+    });
+    await provider.start();
+    await provider.stop();
+  });
+  assert.deepEqual(registerBody?.capabilities, effectiveCapabilities);
 });
 
 test("provider exposes deterministic recovery state transitions", async () => {
