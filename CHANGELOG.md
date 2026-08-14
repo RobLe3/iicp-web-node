@@ -2,9 +2,13 @@
 
 ## Unreleased
 
+## 0.2.4 — 2026-08-14
+
 - Verify directory-signed dispatch tickets in the browser consumer before exposing route material.
 - Fail closed on invalid or missing ticket evidence without silently downgrading to legacy discovery.
 - Consume the canonical dispatch-ticket fixture used by the three server SDKs.
+- Add the shared effective-capability-v1 parser, matcher and explicit provider variants.
+- Add opt-in, chat-only runtime identity composition without changing disabled or non-chat requests.
 - Advance the browser provider compatibility declaration to SDK contract `0.7.102`.
 
 ## 0.2.3 — 2026-08-02
