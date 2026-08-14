@@ -20,6 +20,7 @@
 import { maskTunnelUrl } from "./iicpConsumer.js";
 import type { ChatMessage } from "./iicpConsumer.js";
 import { createCxKeyPair, decryptPayload } from "./cxConfidentiality.js";
+import type { EffectiveCapability } from "./effectiveCapability.js";
 import {
   BROWSER_NODE_SDK_COMPATIBILITY_VERSION,
   BROWSER_NODE_SDK_VERSION,
@@ -42,6 +43,9 @@ export interface BrowserProviderConfig {
   directoryUrl?: string;
   /** Model name advertised to the directory (the loaded WebLLM model id). */
   model: string;
+  /** Complete service-path variants. When present, these replace the legacy
+   * text-only browser advertisement without merging fields across variants. */
+  effectiveCapabilities?: EffectiveCapability[];
   region?: string;
   onLog?: (line: string) => void;
   /** Called after each served task with the running total. */
@@ -73,6 +77,23 @@ export interface BrowserProviderDiagnostic {
 
 const CHAT_INTENT = "urn:iicp:intent:llm:chat:v1";
 export { BROWSER_NODE_SDK_VERSION } from "./version.js";
+
+/** Resolve the exact variants sent to the directory. Explicit effective
+ * capabilities take precedence; the historical browser default is preserved
+ * for callers that do not opt in. */
+export function advertisedBrowserCapabilities(
+  explicit: readonly EffectiveCapability[],
+  model: string,
+): EffectiveCapability[] {
+  return explicit.length > 0
+    ? explicit.map((capability) => ({ ...capability }))
+    : [{
+        intent: CHAT_INTENT,
+        models: [model],
+        max_tokens: 1024,
+        input_modalities: ["text"],
+      }];
+}
 
 /**
  * Coarse region autodetect from the browser's timezone (no network, no
@@ -355,14 +376,10 @@ export class BrowserNodeProvider {
           node_id: this.nodeId,
           endpoint,
           region: this.cfg.region ?? detectRegion(),
-          capabilities: [
-            {
-              intent: CHAT_INTENT,
-              models: [this.cfg.model],
-              max_tokens: 1024,
-              input_modalities: ["text"],
-            },
-          ],
+          capabilities: advertisedBrowserCapabilities(
+            this.cfg.effectiveCapabilities ?? [],
+            this.cfg.model,
+          ),
           limits: { max_concurrent: 1, tokens_per_min: 6000 },
           transport_method: "turn_relay",
           exposure_mode: "relay_required",
