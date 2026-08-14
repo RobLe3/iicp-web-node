@@ -19,6 +19,7 @@
 
 import { encryptPayload, type CxPublicKey } from "./cxConfidentiality.js";
 import { verifyDispatchTicket } from "./dispatchTicket.js";
+import { composeRuntimeIdentity, type RuntimeIdentityOptions } from "./runtimeIdentity.js";
 
 const REFUSED_INTENT_RULES = [
   { category: "prohibited", rule_id: "eu-ai-act-social-scoring", label: "social scoring", fragments: ["social-scoring", "social_scoring", "social:scoring"] },
@@ -99,8 +100,19 @@ export interface Node {
 }
 
 export interface ChatMessage {
-  role: "system" | "user" | "assistant";
+  role: "system" | "developer" | "user" | "assistant";
   content: string;
+}
+
+export interface BrowserChatOptions {
+  endpoint: string;
+  intent?: string;
+  model?: string;
+  cxPublicKey?: CxPublicKey | null;
+  node?: Node;
+  allowed_regions?: string[];
+  required_manifest_identity_level?: RequiredManifestIdentityLevel | null;
+  runtime_identity?: RuntimeIdentityOptions;
 }
 
 /**
@@ -617,7 +629,7 @@ export class IicpBrowserClient {
    */
   async chat(
     messages: ChatMessage[],
-    opts: { endpoint: string; intent?: string; model?: string; cxPublicKey?: CxPublicKey | null; node?: Node; allowed_regions?: string[]; required_manifest_identity_level?: RequiredManifestIdentityLevel | null },
+    opts: BrowserChatOptions,
   ): Promise<Record<string, unknown>> {
     const routed = await this.chatWithReceipt(messages, opts);
     return routed.response;
@@ -629,10 +641,11 @@ export class IicpBrowserClient {
    */
   async chatWithReceipt(
     messages: ChatMessage[],
-    opts: { endpoint: string; intent?: string; model?: string; cxPublicKey?: CxPublicKey | null; node?: Node; allowed_regions?: string[]; required_manifest_identity_level?: RequiredManifestIdentityLevel | null },
+    opts: BrowserChatOptions,
   ): Promise<{ response: Record<string, unknown>; receipt: RoutingReceipt }> {
     const intent = opts.intent ?? "urn:iicp:intent:llm:chat:v1";
     validateIntent(intent);
+    messages = composeRuntimeIdentity(messages, intent, opts.runtime_identity);
     const taskId =
       globalThis.crypto?.randomUUID?.() ?? `task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const payload = { messages, model: opts.model };
