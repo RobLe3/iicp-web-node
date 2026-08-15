@@ -5,6 +5,11 @@ from the network *and* **serve** a model from a browser tab. ESM, built on the p
 native `fetch` / `SubtleCrypto` / WebGPU (and runs in Node ≥18). The browser
 client refuses keyless providers rather than silently sending plaintext.
 
+IICP supplies intent resolution and provider eligibility/selection. MCP, A2A,
+HTTP or another negotiated binding may then execute the selected task. See the
+public [protocol positioning](https://github.com/RobLe3/IICP/blob/main/standards/IICP_PROTOCOL_POSITIONING.md)
+and [adjacent-protocol comparison](https://github.com/RobLe3/IICP/blob/main/standards/PROTOCOL_COMPARISON_2026-08-15.md).
+
 ```
 npm install @iicp/web-node
 ```
