@@ -15,6 +15,23 @@ must first be accepted in the IICP specification repository. Run the package's
 quality checks before opening a pull request and include a content-free
 reproduction for behavior changes.
 
+## Reproducing the checks
+
+From a clean checkout with the Node version used by the quality workflow:
+
+```bash
+npm ci
+npm run typecheck
+npm test
+npm run build
+npm run package:audit
+```
+
+The public [IICP repository map](https://github.com/RobLe3/IICP/blob/main/ecosystem/public-repositories.json)
+identifies normative and implementation ownership. The browser node is an
+experimental Web implementation and is not evidence for native raw-TCP
+framing. A pull request does not authorize a package release or deployment.
+
 ## License
 
 By contributing, you agree your contributions are licensed under Apache-2.0.
