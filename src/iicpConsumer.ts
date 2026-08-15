@@ -19,7 +19,8 @@
 
 import { encryptPayload, type CxPublicKey } from "./cxConfidentiality.js";
 import { verifyDispatchTicket } from "./dispatchTicket.js";
-import { composeRuntimeIdentity, type RuntimeIdentityOptions } from "./runtimeIdentity.js";
+import { composeRuntimeIdentity, withRuntimeFacts, type RuntimeIdentityOptions } from "./runtimeIdentity.js";
+import { BROWSER_NODE_VERSION } from "./version.js";
 
 const REFUSED_INTENT_RULES = [
   { category: "prohibited", rule_id: "eu-ai-act-social-scoring", label: "social scoring", fragments: ["social-scoring", "social_scoring", "social:scoring"] },
@@ -461,6 +462,38 @@ export function createRedactedRoutingReceipt(args: {
 }
 
 /** Browser-native, consumer-only IICP client. */
+function selectedAdvertisedModel(node: Node | undefined, requestedModel: string | undefined): string | undefined {
+  if (requestedModel && node?.models?.includes(requestedModel)) return requestedModel;
+  return node?.models?.length === 1 ? node.models[0] : undefined;
+}
+
+function effectiveCapabilityLabels(node: Node | undefined, intent: string, model: string | undefined): string[] {
+  const raw = node?.capabilities;
+  if (!Array.isArray(raw)) return [];
+  const variants = raw.filter((candidate): candidate is Record<string, unknown> =>
+    Boolean(candidate) && typeof candidate === "object" && candidate.intent === intent
+  );
+  const exact = model
+    ? variants.filter((candidate) => Array.isArray(candidate.models) && candidate.models.includes(model))
+    : variants;
+  const selected = exact.length === 1 ? exact[0] : variants.length === 1 ? variants[0] : undefined;
+  if (!selected) return [];
+  const labels: string[] = [];
+  for (const value of Array.isArray(selected.input_modalities) ? selected.input_modalities : []) {
+    if (typeof value === "string") labels.push(`input_modality:${value}`);
+  }
+  for (const value of Array.isArray(selected.output_modalities) ? selected.output_modalities : []) {
+    if (typeof value === "string") labels.push(`output_modality:${value}`);
+  }
+  for (const value of Array.isArray(selected.features) ? selected.features : []) {
+    if (typeof value === "string") labels.push(value);
+  }
+  for (const value of Array.isArray(selected.execution_capabilities) ? selected.execution_capabilities : []) {
+    if (typeof value === "string") labels.push(`execution:${value}`);
+  }
+  return [...new Set(labels)].sort();
+}
+
 export class IicpBrowserClient {
   private readonly directory: string;
   private readonly timeout: number;
@@ -645,7 +678,19 @@ export class IicpBrowserClient {
   ): Promise<{ response: Record<string, unknown>; receipt: RoutingReceipt }> {
     const intent = opts.intent ?? "urn:iicp:intent:llm:chat:v1";
     validateIntent(intent);
-    messages = composeRuntimeIdentity(messages, intent, opts.runtime_identity);
+    const selectedModel = selectedAdvertisedModel(opts.node, opts.model);
+    messages = composeRuntimeIdentity(
+      messages,
+      intent,
+      withRuntimeFacts(opts.runtime_identity, {
+        client_name: "@iicp/web-node",
+        client_version: BROWSER_NODE_VERSION,
+        connection_mode: "routed",
+        selected_model: selectedModel,
+        effective_capabilities: effectiveCapabilityLabels(opts.node, intent, selectedModel),
+        selection_reason: "matched_intent_and_constraints",
+      }),
+    );
     const taskId =
       globalThis.crypto?.randomUUID?.() ?? `task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const payload = { messages, model: opts.model };
