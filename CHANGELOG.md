@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.5 — 2026-08-15
+
+- Make the bounded runtime identity capsule the default for compatible browser chat calls while retaining explicit disabled and required modes.
+- Add browser package identity, authoritative advertised model/capability facts and control-character bounds without exposing private route data.
+- Preserve non-chat inputs and raw envelope helpers unchanged.
+
 ## 0.2.4 — 2026-08-14
 
 - Verify directory-signed dispatch tickets in the browser consumer before exposing route material.

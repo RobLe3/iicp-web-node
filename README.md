@@ -41,6 +41,20 @@ When the chosen node advertises an encryption key (`nodeCxKey(node)`), the paylo
 no opt-out. A node that does not advertise `cx_public_key`/`public_key` is refused before
 any network send so browser use cannot silently fall back to plaintext.
 
+## Runtime self-description
+
+Browser `chat()` calls add a small IICP runtime identity context by default. It
+tells the selected model that it is being accessed through IICP, identifies the
+active intent and browser package version, and includes a model or capability
+fact only when it comes from the selected node's advertisement. It does not
+expose endpoints, full node identities, candidate sets, scores or credentials,
+and it is not a prompt-injection security boundary.
+
+Set `runtime_identity: { mode: "disabled" }` to preserve the application
+messages without the capsule, or use `mode: "required"` to refuse when a
+supported instruction channel is unavailable. Non-chat operations and the
+plaintext envelope helper remain unchanged.
+
 ## Serve — be a node from the browser
 
 ```ts
