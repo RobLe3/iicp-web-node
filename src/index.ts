@@ -10,6 +10,7 @@ export * from "./dispatchTicket.js";
 export * from "./cxConfidentiality.js";
 export * from "./effectiveCapability.js";
 export * from "./runtimeIdentity.js";
+export * from "./operatingMode.js";
 export * from "./browserNodeProvider.js";
 export * from "./webllmRuntime.js";
 export * from "./version.js";

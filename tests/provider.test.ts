@@ -35,6 +35,28 @@ function runtime(reply = "ok"): BrowserProviderRuntime {
   };
 }
 
+test("provider refuses restricted modes before registration or relay work", () => {
+  let calls = 0;
+  const previous = globalThis.fetch;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response("{}");
+  };
+  try {
+    assert.throws(
+      () => new BrowserNodeProvider(runtime(), {
+        relayUrl: "https://relay.example",
+        model: "browser-model",
+        operatingMode: "private",
+      }),
+      /restricted_profile_unsupported/,
+    );
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = previous;
+  }
+});
+
 test("explicit effective variants replace the legacy browser advertisement", () => {
   const explicit = [{
     intent: "urn:iicp:intent:llm:chat:v1",

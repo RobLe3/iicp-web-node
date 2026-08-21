@@ -43,6 +43,26 @@ test("default directory is iicp.network", () => {
   assert.ok(discoverUrl(DEFAULT_DIRECTORY_URL, "urn:iicp:intent:llm:chat:v1").includes("https://iicp.network/api/v1/discover"));
 });
 
+test("explicit non-public modes fail before browser network activity", () => {
+  let calls = 0;
+  const previous = globalThis.fetch;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response("{}");
+  };
+  try {
+    for (const operating_mode of ["private", "federated_private", "local_only", "custom"] as const) {
+      assert.throws(
+        () => new IicpBrowserClient({ operating_mode }),
+        /restricted_profile_unsupported/,
+      );
+    }
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = previous;
+  }
+});
+
 test("client.discover rejects an invalid intent before any fetch", async () => {
   const c = new IicpBrowserClient({ directory_url: "https://example.test" });
   await assert.rejects(() => c.discover("bogus"), (e: unknown) => e instanceof IicpError);
