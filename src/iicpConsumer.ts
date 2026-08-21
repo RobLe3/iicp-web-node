@@ -21,6 +21,7 @@ import { encryptPayload, type CxPublicKey } from "./cxConfidentiality.js";
 import { verifyDispatchTicket } from "./dispatchTicket.js";
 import { composeRuntimeIdentity, withRuntimeFacts, type RuntimeIdentityOptions } from "./runtimeIdentity.js";
 import { BROWSER_NODE_VERSION } from "./version.js";
+import { requireSupportedBrowserMode, type BrowserOperatingMode } from "./operatingMode.js";
 
 const REFUSED_INTENT_RULES = [
   { category: "prohibited", rule_id: "eu-ai-act-social-scoring", label: "social scoring", fragments: ["social-scoring", "social_scoring", "social:scoring"] },
@@ -44,6 +45,8 @@ const INTENT_RE = /^urn:iicp:intent:[a-z0-9_:/-]+$/;
 export const DEFAULT_DIRECTORY_URL = "https://iicp.network";
 
 export interface ClientConfig {
+  /** Explicit operating mode. Browser CUG/local modes currently fail closed. */
+  operating_mode?: BrowserOperatingMode;
   /** Directory base URL. Default: https://iicp.network (CORS-enabled). */
   directory_url?: string;
   /** Per-request timeout (ms). Default 10000. */
@@ -503,6 +506,7 @@ export class IicpBrowserClient {
   private dispatchTicketKey?: string;
 
   constructor(cfg: ClientConfig = {}) {
+    requireSupportedBrowserMode(cfg.operating_mode);
     this.directory = (cfg.directory_url ?? DEFAULT_DIRECTORY_URL).replace(/\/+$/, "");
     this.timeout = cfg.timeout_ms ?? 10_000;
     this.allowedRegions = normalizeAllowedRegions(cfg.allowed_regions);

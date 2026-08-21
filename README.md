@@ -36,6 +36,14 @@ does not support them, and can enforce strict region and signed-policy-manifest 
 before a prompt is sent. Declared prohibited or high-risk public-mesh intents are refused
 locally. Successful routing receipts exclude prompt, response, token, and endpoint content.
 
+Restricted trust-domain, federated-private, local-only and custom operating
+modes are not supported by the browser package yet. Passing an explicit
+non-public `operating_mode` to `IicpBrowserClient`, or `operatingMode` to
+`BrowserNodeProvider`, throws `restricted_profile_unsupported` during
+construction, before discovery, registration or relay traffic. The package
+does not persist membership credentials in browser storage and never downgrades
+an explicit private mode to the public directory.
+
 When the chosen node advertises an encryption key (`nodeCxKey(node)`), the payload is
 **sealed end-to-end** — the directory, relays, and network see only ciphertext. There is
 no opt-out. A node that does not advertise `cx_public_key`/`public_key` is refused before

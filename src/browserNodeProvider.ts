@@ -21,6 +21,7 @@ import { maskTunnelUrl } from "./iicpConsumer.js";
 import type { ChatMessage } from "./iicpConsumer.js";
 import { createCxKeyPair, decryptPayload } from "./cxConfidentiality.js";
 import type { EffectiveCapability } from "./effectiveCapability.js";
+import { requireSupportedBrowserMode, type BrowserOperatingMode } from "./operatingMode.js";
 import {
   BROWSER_NODE_SDK_COMPATIBILITY_VERSION,
   BROWSER_NODE_SDK_VERSION,
@@ -35,6 +36,8 @@ export interface BrowserProviderRuntime {
 }
 
 export interface BrowserProviderConfig {
+  /** Explicit operating mode. Browser CUG/local modes currently fail closed. */
+  operatingMode?: BrowserOperatingMode;
   /** Relay node base URL, e.g. "http://127.0.0.1:9484". Required. */
   relayUrl: string;
   /** Auto-discovered relay node id. Used to audience-scope relay bind tickets. */
@@ -253,6 +256,7 @@ export class BrowserNodeProvider {
     private readonly runtime: BrowserProviderRuntime,
     private readonly cfg: BrowserProviderConfig,
   ) {
+    requireSupportedBrowserMode(cfg.operatingMode);
     this.nodeId = `browser-${crypto.randomUUID().slice(0, 8)}`;
   }
 
