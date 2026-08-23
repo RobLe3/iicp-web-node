@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.2.6 — 2026-08-23
+
+- Refuse browser private, federated-private and local-only modes that the experimental browser node cannot enforce, rather than silently using public semantics.
+- Keep the browser node experimental and preserve public-mode behavior.
+
 ## 0.2.5 — 2026-08-15
 
 - Make the bounded runtime identity capsule the default for compatible browser chat calls while retaining explicit disabled and required modes.
