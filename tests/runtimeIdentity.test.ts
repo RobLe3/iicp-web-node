@@ -11,6 +11,7 @@ import {
   validIicpExplanation,
   composeRuntimeIdentity,
 } from "../src/runtimeIdentity.js";
+import { BROWSER_NODE_VERSION } from "../src/version.js";
 import type { ChatMessage } from "../src/iicpConsumer.js";
 
 const fixtureBytes = readFileSync(new URL("../parity/runtime-identity-context-v0/fixture.json", import.meta.url));
@@ -64,7 +65,7 @@ describe("runtime identity shared parity contract", () => {
         effective_capabilities: ["input_modality:image"],
         selection_reason: "matched_intent_and_constraints",
         client_name: "@iicp/web-node",
-        client_version: "0.2.6",
+        client_version: BROWSER_NODE_VERSION,
         connection_mode: "routed",
       },
     );
@@ -93,12 +94,12 @@ describe("runtime identity shared parity contract", () => {
       RUNTIME_IDENTITY_CHAT_INTENT,
       {
         client_name: "@iicp/web-node",
-        client_version: "0.2.6",
+        client_version: BROWSER_NODE_VERSION,
         connection_mode: "local_browser",
         selection_reason: "local_browser_execution",
       },
     )[0]!.content;
-    assert.match(content, /client: @iicp\/web-node 0\.2\.6/);
+    assert.match(content, new RegExp(`client: @iicp/web-node ${BROWSER_NODE_VERSION.replaceAll(".", "\\.")}`));
     assert.match(content, /running locally in the browser/);
     assert.match(content, /no remote IICP provider was selected/);
     assert.throws(
