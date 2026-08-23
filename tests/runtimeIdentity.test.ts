@@ -7,6 +7,8 @@ import {
   RUNTIME_IDENTITY_CHAT_INTENT,
   RUNTIME_IDENTITY_MARKER,
   RuntimeIdentityContextUnsupported,
+  isDirectIicpExplainer,
+  validIicpExplanation,
   composeRuntimeIdentity,
 } from "../src/runtimeIdentity.js";
 import type { ChatMessage } from "../src/iicpConsumer.js";
@@ -19,7 +21,7 @@ const fixture = JSON.parse(fixtureBytes.toString("utf8")) as {
 
 describe("runtime identity shared parity contract", () => {
   it("pins the exact shared fixture", () => {
-    assert.equal(createHash("sha256").update(fixtureBytes).digest("hex"), "a31064ca630ab5409fb2f57edd1ef29a5c79532b8960927f6a0d2b52d7d71c81");
+    assert.equal(createHash("sha256").update(fixtureBytes).digest("hex"), "3f6071dd39ca9c743ccd3c9c3da1582f1005c4c6daa210fbf62f5bae60d241ac");
     assert.equal(fixture.context_marker, RUNTIME_IDENTITY_MARKER);
     assert.equal(fixture.composition.eligible_intent, RUNTIME_IDENTITY_CHAT_INTENT);
   });
@@ -131,5 +133,12 @@ describe("runtime identity shared parity contract", () => {
       ),
       /selection reason is unsupported/,
     );
+  });
+
+  it("recognizes direct IICP questions and rejects conflicting expansions", () => {
+    assert.equal(isDirectIicpExplainer("Explain IICP."), true);
+    assert.equal(isDirectIicpExplainer("Compare IICP with an industrial protocol"), false);
+    assert.equal(validIicpExplanation("IICP is the Intent-based Inter-agent Communication Protocol, a provider-neutral control plane for discovery."), true);
+    assert.equal(validIicpExplanation("IICP means Industrial Internet of Things Computing."), false);
   });
 });
