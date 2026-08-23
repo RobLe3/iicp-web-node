@@ -62,7 +62,7 @@ describe("runtime identity shared parity contract", () => {
         effective_capabilities: ["input_modality:image"],
         selection_reason: "matched_intent_and_constraints",
         client_name: "@iicp/web-node",
-        client_version: "0.2.5",
+        client_version: "0.2.6",
         connection_mode: "routed",
       },
     );
@@ -91,7 +91,7 @@ describe("runtime identity shared parity contract", () => {
       RUNTIME_IDENTITY_CHAT_INTENT,
       {
         client_name: "@iicp/web-node",
-        client_version: "0.2.5",
+        client_version: "0.2.6",
         connection_mode: "local_browser",
         selection_reason: "local_browser_execution",
       },
