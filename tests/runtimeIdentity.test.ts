@@ -96,7 +96,7 @@ describe("runtime identity shared parity contract", () => {
         selection_reason: "local_browser_execution",
       },
     )[0]!.content;
-    assert.match(content, /client: @iicp\/web-node 0\.2\.5/);
+    assert.match(content, /client: @iicp\/web-node 0\.2\.6/);
     assert.match(content, /running locally in the browser/);
     assert.match(content, /no remote IICP provider was selected/);
     assert.throws(
