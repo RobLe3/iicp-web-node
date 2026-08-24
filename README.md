@@ -76,6 +76,9 @@ because browser tabs cannot accept raw inbound TCP.
 
 Browser provider mode is experimental. Tab lifetime, relay availability,
 browser policy and device resources make it unsuitable for unattended service.
+The bounded Chromium, Firefox and WebKit compatibility matrix is documented in
+[`docs/BROWSER_COMPATIBILITY.md`](docs/BROWSER_COMPATIBILITY.md). WebGPU support
+is reported separately from IICP consumer and cryptographic compatibility.
 
 Startup is intentionally ticketed: the provider registers, requests a short-lived relay
 bind ticket scoped to its worker and selected relay, and presents that ticket when it binds.

@@ -1,0 +1,66 @@
+{
+  "schema": "iicp-browser-compatibility-v1",
+  "evidence_class": "project-verified-local-headless",
+  "package": "@iicp/web-node",
+  "package_version": "0.2.6",
+  "recorded_at": "2026-08-24T13:02:47.890Z",
+  "limits": [
+    "Headless engine evidence is not representative physical-device or sustained provider evidence.",
+    "WebGPU is classified independently; an unavailable adapter is not an IICP protocol failure.",
+    "No production directory, relay, model or task payload is used."
+  ],
+  "lifecycle_classification": {
+    "cancellation": "PASS: AbortSignal behavior verified in every engine",
+    "tab_suspension": "NOT_TESTED: headless automation does not reproduce OS tab suspension reliably",
+    "reconnect": "NOT_TESTED: requires a disposable relay lifecycle lane",
+    "relay_binding": "NOT_TESTED: no relay is contacted by this content-free package matrix",
+    "permission_denial": "CLASSIFIED: unavailable or denied WebGPU adapters are reported as execution unsupported, not protocol failure"
+  },
+  "results": [
+    {
+      "engine": "chromium",
+      "version": "149.0.7827.55",
+      "status": "PASS",
+      "identity": true,
+      "cryptoRoundTrip": true,
+      "dispatchPositive": true,
+      "dispatchNegative": true,
+      "cancellation": true,
+      "webgpu": {
+        "supported": false,
+        "reason": "your browser exposes WebGPU but no usable GPU adapter was found — it may be blocklisted, hardware acceleration may be off, or WebGPU isn't enabled on this device"
+      },
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.7827.55 Safari/537.36"
+    },
+    {
+      "engine": "firefox",
+      "version": "151.0",
+      "status": "PASS",
+      "identity": true,
+      "cryptoRoundTrip": true,
+      "dispatchPositive": true,
+      "dispatchNegative": true,
+      "cancellation": true,
+      "webgpu": {
+        "supported": false,
+        "reason": "your browser exposes WebGPU but no usable GPU adapter was found — it may be blocklisted, hardware acceleration may be off, or WebGPU isn't enabled on this device"
+      },
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:151.0) Gecko/20100101 Firefox/151.0"
+    },
+    {
+      "engine": "webkit",
+      "version": "26.5",
+      "status": "PASS",
+      "identity": true,
+      "cryptoRoundTrip": true,
+      "dispatchPositive": true,
+      "dispatchNegative": true,
+      "cancellation": true,
+      "webgpu": {
+        "supported": false,
+        "reason": "WebGPU not available — requires Chrome 113+, Firefox nightly, or Safari TP"
+      },
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5 Safari/605.1.15"
+    }
+  ]
+}
