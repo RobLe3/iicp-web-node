@@ -25,6 +25,8 @@
     "build": "tsc -p tsconfig.json && node scripts/check-package-provenance.mjs",
     "typecheck": "npm run version:check && tsc -p tsconfig.json --noEmit",
     "test": "npm run version:check && tsx --test tests/*.test.ts",
+    "test:browsers": "npm run build && node scripts/browser-compatibility.mjs",
+    "evidence:browsers": "npm run build && node scripts/browser-compatibility.mjs --write",
     "package:audit": "npm pack --dry-run --json > /tmp/iicp-web-node-pack.json && node -e \"const p=require('/tmp/iicp-web-node-pack.json')[0]; if (!p.files.some(f=>f.path==='dist/build-manifest.json')) process.exit(1); if (p.files.some(f=>/(^|\\/)(\\.env|credentials?|node_modules)(\\/|$)/i.test(f.path))) process.exit(1)\""
   },
   "keywords": [
@@ -46,6 +48,7 @@
   },
   "devDependencies": {
     "@mlc-ai/web-llm": "^0.2.84",
+    "playwright": "^1.61.1",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   },
